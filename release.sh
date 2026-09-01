@@ -11,24 +11,23 @@
 # the two-triple build below is what `--arch` would have routed through xcbuild
 # for, and notarytool ships with the CLT.
 #
-# One-time setup:
+# One-time setup lives in ./setup-signing.sh — run that once and this script
+# needs no arguments and no environment ever again.
 #
-#   1. Join the Apple Developer Program and create a "Developer ID Application"
-#      certificate, then install it in your login keychain. Confirm with:
-#          security find-identity -v -p codesigning
-#
-#   2. Store notary credentials once, so this script never sees a password.
-#      Use an app-specific password from appleid.apple.com, not your Apple ID
-#      password:
-#          xcrun notarytool store-credentials tokens-on-track-notary \
-#              --apple-id you@example.com --team-id TEAMID
-#
-#   3. Export the signing identity, copied verbatim from find-identity:
-#          export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
-#
-# Then:
-#
+#   ./setup-signing.sh      certificate + notary credentials + key backup
 #   ./release.sh            build dist/Tokens on Track-<version>.dmg
+#
+# Configuration is resolved in this order, first hit wins:
+#
+#   1. the environment
+#   2. ./.env, if present (gitignored; see .env.example)
+#   3. auto-detection — the single "Developer ID Application" certificate in
+#      the keychain, and the default notary profile name
+#
+# So the normal case is zero configuration. .env exists for the machine that
+# has two certificates, or a notary profile under a different name. No secret
+# belongs in it: the app-specific password lives in the keychain, put there
+# once by setup-signing.sh, and neither script ever reads it back.
 #
 # Bump CFBundleShortVersionString and CFBundleVersion in Resources/Info.plist
 # before each release; both are read from there rather than passed in, so the
@@ -40,6 +39,11 @@ cd "$(dirname "$0")"
 APP_NAME="Tokens on Track"
 DIST_DIR="dist"
 BUNDLE="${DIST_DIR}/${APP_NAME}.app"
+
+# Sourced before the defaults below are applied, so .env can set either
+# variable, and an explicit environment variable still beats the file.
+[ -f .env ] && . ./.env
+
 NOTARY_PROFILE="${NOTARY_PROFILE:-tokens-on-track-notary}"
 
 # Must match Package.swift's platforms declaration.
@@ -60,7 +64,25 @@ fail() { echo "error: $*" >&2; exit 1; }
 # --------------------------------------------------------------------- #
 echo "==> preflight"
 
-[ -n "${DEVELOPER_ID:-}" ] || fail 'DEVELOPER_ID is unset. See the header of this script.'
+# Auto-detect the identity so the common case needs no configuration at all:
+# one Developer ID Application certificate in the keychain is the whole
+# answer. Two is genuinely ambiguous — an expiring certificate sitting next to
+# its replacement would otherwise sign a public release with whichever one
+# sorted first — so that case refuses to guess.
+if [ -z "${DEVELOPER_ID:-}" ]; then
+    FOUND="$(security find-identity -v -p codesigning \
+        | sed -n 's/.*"\(Developer ID Application: .*\)".*/\1/p')"
+    # `|| true` because grep exits 1 on a zero count, which set -e would take
+    # as a script failure rather than the answer it is.
+    case "$(printf '%s' "$FOUND" | grep -c . || true)" in
+        0) fail 'no "Developer ID Application" certificate in the keychain.
+       Run: ./setup-signing.sh' ;;
+        1) DEVELOPER_ID="$FOUND" ;;
+        *) fail "more than one \"Developer ID Application\" certificate:
+$(printf '%s\n' "$FOUND" | sed 's/^/         /')
+       Choose one in .env — see .env.example." ;;
+    esac
+fi
 
 security find-identity -v -p codesigning | grep -qF "$DEVELOPER_ID" \
     || fail "no codesigning identity matching \"${DEVELOPER_ID}\" in the keychain.
@@ -77,7 +99,7 @@ xcrun --find notarytool >/dev/null 2>&1 || fail 'notarytool not found. Install t
 
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
     || fail "notary profile \"${NOTARY_PROFILE}\" is missing or invalid.
-       Run: xcrun notarytool store-credentials ${NOTARY_PROFILE} --apple-id ... --team-id ..."
+       Run: ./setup-signing.sh"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Resources/Info.plist)"

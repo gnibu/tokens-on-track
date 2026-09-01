@@ -230,6 +230,57 @@ fetch already retries once; a later run generally succeeds.
 The header marks a reading `(stale)` once the cache is more than 45 minutes old.
 Hit **Refresh**; if that fails the per-provider error says why.
 
+## Releasing
+
+`build.sh` is the development loop — host architecture, ad-hoc signature, no
+network. `release.sh` is the shipping loop: a universal binary, a Developer ID
+signature, notarization, and a stapled `.dmg` that opens on a stranger's Mac
+without a Gatekeeper warning.
+
+Once per machine:
+
+```sh
+./setup-signing.sh
+```
+
+It walks through issuing the Developer ID Application certificate, stores the
+notary credentials in the keychain, exports a backup of the signing key, and
+writes a `.env`. It is re-runnable and skips whatever is already done.
+
+Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
+`Resources/Info.plist` first, since both are read from there:
+
+```sh
+./release.sh
+```
+
+No arguments and no environment: the signing identity is auto-detected from the
+keychain, and the notary password never leaves it. `.env` (see
+[`.env.example`](.env.example)) is only needed on a machine holding more than
+one Developer ID certificate. Output lands in `dist/`.
+
+`release.py` is the same pipeline with a watchable wait. `release.sh` hands
+notarization to `notarytool --wait`, which blocks on a blank line for however
+long Apple takes — minutes usually, but an hour on a Team ID with no
+submission history, and nothing distinguishes a slow queue from a wedged one.
+The Python version submits with `--no-wait` and polls, so the wait has an
+elapsed clock, a budget bar, and a log line each time Apple's answer changes.
+It reads the same `.env` and the same keychain profile, and needs no install:
+[`uv`](https://docs.astral.sh/uv/) fetches its two dependencies from the
+inline PEP 723 metadata on first run.
+
+```sh
+./release.py                # same artifacts as release.sh
+./release.py --timeout 90   # allow 90 min per submission
+./release.py --self-test    # check the parsing logic, build nothing
+```
+
+Notarization is not App Store submission. The upload is an automated malware
+scan — no review, no sandbox requirement, and Apple distributes nothing. It is
+also not optional for a public download: a signed but un-notarized app trips
+Gatekeeper's *"cannot be opened because Apple cannot check it for malicious
+software"*.
+
 ## Uninstall
 
 ```sh

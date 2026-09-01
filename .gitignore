@@ -7,3 +7,9 @@
 
 # release.sh output
 dist/
+
+# local signing config (see .env.example)
+.env
+
+# never commit a signing key
+*.p12
