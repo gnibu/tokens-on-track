@@ -5,5 +5,15 @@
 .swiftpm/
 *.app/
 
-# release.sh output
+# release.py output
 dist/
+
+# local signing config (see .env.example)
+.env
+
+# never commit a signing key
+*.p12
+
+# byte-compiled release.py, from importing it for diagnostics
+__pycache__/
+*.pyc
