@@ -15,8 +15,13 @@ in the log every time Apple's answer changes.
 Run ./setup-signing.sh once first; this reads the .env and the keychain notary
 profile it leaves behind.
 
-    ./release.py                build dist/Tokens on Track-<version>.dmg
+    ./release.py                build dist/TokensOnTrack-<version>.dmg
     ./release.py --timeout 90   allow 90 minutes per submission
+    ./release.py --publish      also tag v<version> and create a GitHub release
+
+--publish is checked before the build, not after, so a missing gh login or a
+version that was never bumped fails in the first second rather than after two
+compiles and two round trips to Apple's notary queue.
 
 Bump CFBundleShortVersionString and CFBundleVersion in Resources/Info.plist
 before each release; both are read from there, so the plist stays the single
@@ -51,6 +56,10 @@ from rich.theme import Theme
 
 APP_NAME = "Tokens on Track"
 BINARY_NAME = "AIUsage"
+# Spaces in the dmg filename survive locally but GitHub rewrites them to dots
+# on download, so the artifact is named without them. The volume name keeps
+# the spaces — that is what a user sees when the image is mounted.
+ASSET_NAME = "TokensOnTrack"
 DIST_DIR = Path("dist")
 DEPLOYMENT_TARGET = "14.0"
 TRIPLES = (
@@ -380,12 +389,83 @@ def verify(bundle: Path, dmg: Path) -> None:
 
 
 # --------------------------------------------------------------------- #
+# Publishing
+#
+# gh rather than the GitHub API: the token, the auth refresh and the upload
+# retries are already solved there, and the whole feature is three commands.
+# --------------------------------------------------------------------- #
+def git_out(args: Sequence[str]) -> str:
+    return run(["git", *args]).strip()
+
+
+def publish_preflight(tag: str) -> None:
+    """Checked before the build, not after.
+
+    Every one of these is a condition that would otherwise be discovered at
+    the very end, having already spent two compiles and two round trips to
+    Apple's notary queue.
+    """
+    if shutil.which("gh") is None:
+        fail("gh not found. Install it with: brew install gh")
+
+    if not quiet_ok(["gh", "auth", "status"]):
+        fail("gh is not authenticated. Run: gh auth login")
+
+    if quiet_ok(["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"]):
+        fail(
+            f"tag {tag} already exists locally.\n"
+            "Bump CFBundleShortVersionString in Resources/Info.plist, or delete\n"
+            f"the tag with: git tag -d {tag}"
+        )
+
+    if git_out(["ls-remote", "--tags", "origin", tag]):
+        fail(f"tag {tag} already exists on origin. Bump the version.")
+
+    # A published binary should be reproducible from a commit someone else can
+    # fetch. Dirty or unpushed means the tag would point at something that
+    # does not describe what was actually built.
+    if git_out(["status", "--porcelain"]):
+        fail("working tree is dirty. Commit or stash before publishing.")
+
+    if not git_out(["branch", "-r", "--contains", "HEAD"]):
+        fail("HEAD is not on any remote branch. Push it before publishing.")
+
+
+def publish(dmg: Path, tag: str, version: str) -> None:
+    step(f"publishing {tag}")
+
+    run(["git", "tag", "-a", tag, "-m", f"{APP_NAME} {version}"])
+    run(["git", "push", "origin", tag])
+    detail(f"tagged {git_out(['rev-parse', '--short', 'HEAD'])}")
+
+    try:
+        url = run(
+            [
+                "gh", "release", "create", tag, str(dmg),
+                "--title", f"{APP_NAME} {version}",
+                "--generate-notes",
+            ]
+        ).strip()
+    except Fail:
+        # The tag is already on origin at this point, and leaving it there
+        # silently would make the next attempt fail the preflight above with
+        # no explanation of how it got there.
+        console.print(
+            f"[warn]the tag is already pushed.[/warn] To retry cleanly:\n"
+            f"  git push --delete origin {tag} && git tag -d {tag}"
+        )
+        raise
+
+    detail(url, style="ok")
+
+
+# --------------------------------------------------------------------- #
 # Preflight
 #
 # Every check here maps to a failure that would otherwise surface minutes
 # later, after a full two-architecture compile or a round trip to Apple.
 # --------------------------------------------------------------------- #
-def preflight(identity: str, profile: str) -> tuple[str, str]:
+def preflight(identity: str, profile: str, publishing: bool) -> tuple[str, str]:
     step("preflight")
 
     if not identity.startswith("Developer ID Application:"):
@@ -412,23 +492,28 @@ def preflight(identity: str, profile: str) -> tuple[str, str]:
     table.add_row("app", f"{APP_NAME} {version} ({build})")
     table.add_row("identity", identity)
     table.add_row("notary profile", profile)
+    if publishing:
+        table.add_row("publishing", f"v{version} to GitHub")
     console.print(Panel(table, title="release", border_style="cyan"))
+
+    if publishing:
+        publish_preflight(f"v{version}")
 
     return version, build
 
 
 # --------------------------------------------------------------------- #
-def release(timeout_minutes: int) -> None:
+def release(timeout_minutes: int, publishing: bool) -> None:
     os.chdir(Path(__file__).resolve().parent)
 
     dotenv = load_dotenv()
     identity = resolve_identity(setting("DEVELOPER_ID", dotenv))
     profile = setting("NOTARY_PROFILE", dotenv, "tokens-on-track-notary")
 
-    version, _ = preflight(identity, profile)
+    version, _ = preflight(identity, profile, publishing)
 
     bundle = DIST_DIR / f"{APP_NAME}.app"
-    dmg = DIST_DIR / f"{APP_NAME}-{version}.dmg"
+    dmg = DIST_DIR / f"{ASSET_NAME}-{version}.dmg"
 
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
@@ -465,6 +550,9 @@ def release(timeout_minutes: int) -> None:
         run(["xcrun", "stapler", "staple", str(dmg)])
 
         verify(bundle, dmg)
+
+    if publishing:
+        publish(dmg, f"v{version}", version)
 
     size_mb = dmg.stat().st_size / (1024 * 1024)
     console.print()
@@ -575,6 +663,11 @@ def main() -> int:
         help="how long to wait on each notarization before giving up (default: 60)",
     )
     parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="tag v<version> and create a GitHub release with the dmg attached",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="check the parsing and identity logic, build nothing",
@@ -585,7 +678,7 @@ def main() -> int:
         return self_test()
 
     try:
-        release(args.timeout)
+        release(args.timeout, args.publish)
     except Fail as exc:
         console.print(f"[bad]error:[/bad] {exc}")
         return 1

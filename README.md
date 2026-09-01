@@ -252,10 +252,18 @@ Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
 `Resources/Info.plist` first, since both are read from there:
 
 ```sh
-./release.py                # dist/Tokens on Track-<version>.dmg
+./release.py                # dist/TokensOnTrack-<version>.dmg
+./release.py --publish      # ...and tag v<version>, and put it on GitHub
 ./release.py --timeout 90   # allow 90 min per notarization
 ./release.py --self-test    # check the parsing logic, build nothing
 ```
+
+`--publish` tags the current commit `v<version>`, pushes the tag, and creates a
+GitHub release with the dmg attached and generated notes. Its preconditions —
+`gh` installed and authenticated, the version bumped to something not already
+tagged, a clean tree, and a commit that exists on a remote — are all checked
+before the build starts rather than after, so a stale version number costs a
+second instead of two compiles and two trips through Apple's notary queue.
 
 No arguments and no environment needed: the signing identity is auto-detected
 from the keychain, and the notary password never leaves it. `.env` (see
