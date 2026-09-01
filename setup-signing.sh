@@ -1,10 +1,10 @@
 #!/bin/sh
 # One-time signing setup for Tokens on Track.
 #
-# release.sh needs two things that live outside the repository: a Developer ID
+# release.py needs two things that live outside the repository: a Developer ID
 # Application certificate in the login keychain, and a notary credential
 # profile. This script gets both in place, backs up the irreplaceable half,
-# and writes the .env that makes release.sh argument-free afterwards.
+# and writes the .env that makes release.py argument-free afterwards.
 #
 #   ./setup-signing.sh
 #
@@ -43,7 +43,7 @@ echo "    notarytool ok"
 # --------------------------------------------------------------------- #
 # Phase 1 — certificate
 #
-# Auto-detection matches release.sh: one certificate is the answer, none is a
+# Auto-detection matches release.py: one certificate is the answer, none is a
 # to-do list, more than one is a decision only the user can make.
 # --------------------------------------------------------------------- #
 echo "==> checking for a Developer ID Application certificate"
@@ -157,7 +157,7 @@ fi
 # Written before the backup gate below, so a run that stops at the backup
 # still leaves the machine configured rather than half-configured.
 #
-# Nothing here is secret. It exists so release.sh does not have to re-derive
+# Nothing here is secret. It exists so release.py does not have to re-derive
 # the identity on every run, and so a second certificate showing up later does
 # not turn into an ambiguity error mid-release.
 # --------------------------------------------------------------------- #
@@ -260,4 +260,4 @@ cat <<'INSTRUCTIONS'
 INSTRUCTIONS
 
 echo "    setup complete. Release with:"
-echo "        ./release.sh"
+echo "        ./release.py"

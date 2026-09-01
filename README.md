@@ -233,7 +233,7 @@ Hit **Refresh**; if that fails the per-provider error says why.
 ## Releasing
 
 `build.sh` is the development loop — host architecture, ad-hoc signature, no
-network. `release.sh` is the shipping loop: a universal binary, a Developer ID
+network. `release.py` is the shipping loop: a universal binary, a Developer ID
 signature, notarization, and a stapled `.dmg` that opens on a stranger's Mac
 without a Gatekeeper warning.
 
@@ -244,36 +244,42 @@ Once per machine:
 ```
 
 It walks through issuing the Developer ID Application certificate, stores the
-notary credentials in the keychain, exports a backup of the signing key, and
-writes a `.env`. It is re-runnable and skips whatever is already done.
+notary credentials in the keychain, checks your backup of the signing key is
+really encrypted, and writes a `.env`. It is re-runnable and skips whatever is
+already done.
 
 Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
 `Resources/Info.plist` first, since both are read from there:
 
 ```sh
-./release.sh
-```
-
-No arguments and no environment: the signing identity is auto-detected from the
-keychain, and the notary password never leaves it. `.env` (see
-[`.env.example`](.env.example)) is only needed on a machine holding more than
-one Developer ID certificate. Output lands in `dist/`.
-
-`release.py` is the same pipeline with a watchable wait. `release.sh` hands
-notarization to `notarytool --wait`, which blocks on a blank line for however
-long Apple takes — minutes usually, but an hour on a Team ID with no
-submission history, and nothing distinguishes a slow queue from a wedged one.
-The Python version submits with `--no-wait` and polls, so the wait has an
-elapsed clock, a budget bar, and a log line each time Apple's answer changes.
-It reads the same `.env` and the same keychain profile, and needs no install:
-[`uv`](https://docs.astral.sh/uv/) fetches its two dependencies from the
-inline PEP 723 metadata on first run.
-
-```sh
-./release.py                # same artifacts as release.sh
-./release.py --timeout 90   # allow 90 min per submission
+./release.py                # dist/Tokens on Track-<version>.dmg
+./release.py --timeout 90   # allow 90 min per notarization
 ./release.py --self-test    # check the parsing logic, build nothing
 ```
+
+No arguments and no environment needed: the signing identity is auto-detected
+from the keychain, and the notary password never leaves it. `.env` (see
+[`.env.example`](.env.example)) is only for a machine holding more than one
+Developer ID certificate, or a notary profile under a different name.
+
+No install step either — [`uv`](https://docs.astral.sh/uv/) fetches the two
+dependencies from the script's inline PEP 723 metadata on first run.
+
+Notarization is submitted with `--no-wait` and polled rather than handed to
+`notarytool --wait`, which blocks on a blank line for however long Apple takes.
+That is minutes usually, but can be an hour on a Team ID with no submission
+history, and nothing distinguishes a slow queue from a wedged one. Polling
+gives the wait an elapsed clock, a budget bar, and a log line each time Apple's
+answer changes.
+
+Two submissions happen per release, and neither is redundant. A ticket is
+bound to the cdhash of exactly what was submitted, and stapling embeds it so
+Gatekeeper can validate offline. The app is notarized and stapled first, then
+copied into the dmg, so a user who drags it to `/Applications` gets a copy with
+its ticket already inside; the dmg is then notarized and stapled on its own
+behalf so it opens cleanly on a machine that has never seen it. The order is
+forced — once the dmg is built it is read-only, so the enclosed app cannot be
+stapled after the fact.
 
 Notarization is not App Store submission. The upload is an automated malware
 scan — no review, no sandbox requirement, and Apple distributes nothing. It is

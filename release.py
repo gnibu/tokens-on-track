@@ -5,17 +5,15 @@
 # ///
 """Build a signed, notarized, universal Tokens on Track.dmg.
 
-Same pipeline as release.sh, same artifacts, different waiting. release.sh
-hands notarization to `notarytool --wait`, which blocks silently for however
-long Apple takes — typically minutes, but an hour on a Team ID with no
-submission history, and there is no way to tell a slow queue from a wedged one
-while staring at a blank line.
+Notarization is submitted with --no-wait and polled, rather than handed to
+`notarytool --wait`. --wait blocks silently for however long Apple takes —
+typically minutes, but an hour on a Team ID with no submission history, and
+there is no way to tell a slow queue from a wedged one while staring at a
+blank line. Polling gives the wait an elapsed clock, a budget bar, and a line
+in the log every time Apple's answer changes.
 
-This version submits with --no-wait and polls, so the wait has an elapsed
-clock, a budget bar, and a line in the log every time Apple's answer changes.
-
-Setup is identical and shared: run ./setup-signing.sh once, and this reads the
-same .env and the same keychain notary profile.
+Run ./setup-signing.sh once first; this reads the .env and the keychain notary
+profile it leaves behind.
 
     ./release.py                build dist/Tokens on Track-<version>.dmg
     ./release.py --timeout 90   allow 90 minutes per submission
@@ -145,12 +143,11 @@ def detail(text: str, style: str = "dim") -> None:
 #
 # Resolution order: .env, then the environment, then auto-detection.
 #
-# Note this is the reverse of most dotenv libraries, and deliberately so — it
-# matches `. ./.env` in release.sh, where a plain assignment in the file
-# overwrites whatever was exported. Two release scripts that read the same
-# file and disagree about which value wins is a worse trap than either rule on
-# its own. .env is the checked-in-shaped, deliberate answer; the environment
-# is the accident.
+# Note this is the reverse of most dotenv libraries, and deliberately so.
+# .env is the deliberate answer, written once and inspectable; an environment
+# variable is usually an accident inherited from a parent shell. Signing the
+# wrong artifact with the wrong certificate because something was exported
+# three terminals ago is the failure worth designing against.
 # --------------------------------------------------------------------- #
 def load_dotenv(path: Path = Path(".env")) -> dict[str, str]:
     if not path.is_file():
@@ -525,10 +522,9 @@ def self_test() -> int:
     assert parsed["APPLE_ID"] == "you@example.com", parsed
     assert parsed["NOTARY_PROFILE"] == "quoted", parsed
 
-    # The file beats the environment, which beats the default — the same way
-    # round as `. ./.env` in release.sh. Worth pinning: it is the reverse of
-    # what every other dotenv reader does, so it is exactly the kind of thing
-    # a later "cleanup" would silently flip back.
+    # The file beats the environment, which beats the default. Worth pinning:
+    # it is the reverse of what every other dotenv reader does, so it is
+    # exactly the kind of thing a later "cleanup" would silently flip back.
     os.environ.pop("NOTARY_PROFILE", None)
     assert setting("NOTARY_PROFILE", parsed, "fallback") == "quoted"
     os.environ["NOTARY_PROFILE"] = "from-env"
