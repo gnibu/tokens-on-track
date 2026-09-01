@@ -18,6 +18,12 @@ profile it leaves behind.
     ./release.py                build dist/TokensOnTrack-<version>.dmg
     ./release.py --timeout 90   allow 90 minutes per submission
     ./release.py --publish      also tag v<version> and create a GitHub release
+    ./release.py --force        rebuild even when dist/ is already current
+
+Like make, a build is skipped when the artifacts in dist/ are newer than
+everything they were built from. The compile is not what that saves — swift
+build is already incremental — it is the notary queue, which took over an hour
+on this team's first submission.
 
 --publish is checked before the build, not after, so a missing gh login or a
 version that was never bumped fails in the first second rather than after two
@@ -39,7 +45,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import NoReturn, Sequence
+from typing import Iterable, NoReturn, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from rich.console import Console
@@ -389,6 +395,53 @@ def verify(bundle: Path, dmg: Path) -> None:
 
 
 # --------------------------------------------------------------------- #
+# Is the last build still good?
+#
+# make's rule, without make's machinery: an output is current when it exists
+# and nothing it was built from is newer. The point is not to save the compile
+# — swift build is already incremental and takes under a minute — it is to
+# avoid re-entering Apple's notary queue, which took over an hour on this
+# team's first submission and is not something to spend twice on an unchanged
+# binary.
+#
+# The mtime comparison alone would be too trusting, because it cannot see a
+# run that died between notarizing and stapling. `stapler validate` can, so
+# both have to agree before the build is skipped.
+# --------------------------------------------------------------------- #
+def newest_mtime(paths: Iterable[Path]) -> float:
+    return max((p.stat().st_mtime for p in paths if p.is_file()), default=0.0)
+
+
+def source_inputs() -> list[Path]:
+    """Everything that changes what the artifacts should contain.
+
+    release.py is in the list because it decides how they are signed — editing
+    the signing flags and reusing yesterday's bundle would produce a release
+    that does not match the script that claims to have made it.
+    """
+    roots = [Path("Sources"), Path("Resources")]
+    files = [Path("Package.swift"), Path(__file__).resolve()]
+    for root in roots:
+        files.extend(p for p in root.rglob("*") if p.is_file())
+    return files
+
+
+def dist_is_current(bundle: Path, dmg: Path) -> bool:
+    if not (bundle.is_dir() and dmg.is_file()):
+        return False
+
+    # min, not max: the older of the two artifacts is the one that decides
+    # whether the pair as a whole predates a source edit.
+    built = min(bundle.stat().st_mtime, dmg.stat().st_mtime)
+    if built < newest_mtime(source_inputs()):
+        return False
+
+    return quiet_ok(["xcrun", "stapler", "validate", str(bundle)]) and quiet_ok(
+        ["xcrun", "stapler", "validate", str(dmg)]
+    )
+
+
+# --------------------------------------------------------------------- #
 # Publishing
 #
 # gh rather than the GitHub API: the token, the auth refresh and the upload
@@ -503,7 +556,7 @@ def preflight(identity: str, profile: str, publishing: bool) -> tuple[str, str]:
 
 
 # --------------------------------------------------------------------- #
-def release(timeout_minutes: int, publishing: bool) -> None:
+def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
     os.chdir(Path(__file__).resolve().parent)
 
     dotenv = load_dotenv()
@@ -514,6 +567,13 @@ def release(timeout_minutes: int, publishing: bool) -> None:
 
     bundle = DIST_DIR / f"{APP_NAME}.app"
     dmg = DIST_DIR / f"{ASSET_NAME}-{version}.dmg"
+
+    if not force and dist_is_current(bundle, dmg):
+        step("dist is up to date")
+        detail("nothing newer than the last build — reusing it", style="ok")
+        detail("rebuild anyway with --force")
+        finish(bundle, dmg, version, publishing)
+        return
 
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
@@ -549,7 +609,12 @@ def release(timeout_minutes: int, publishing: bool) -> None:
         step("stapling dmg")
         run(["xcrun", "stapler", "staple", str(dmg)])
 
-        verify(bundle, dmg)
+    finish(bundle, dmg, version, publishing)
+
+
+def finish(bundle: Path, dmg: Path, version: str, publishing: bool) -> None:
+    """Everything that is worth doing whether or not the build just ran."""
+    verify(bundle, dmg)
 
     if publishing:
         publish(dmg, f"v{version}", version)
@@ -558,7 +623,8 @@ def release(timeout_minutes: int, publishing: bool) -> None:
     console.print()
     console.print(
         Panel(
-            f"[ok]{dmg}[/ok]  [dim]({size_mb:.1f} MB)[/dim]\nready to upload.",
+            f"[ok]{dmg}[/ok]  [dim]({size_mb:.1f} MB)[/dim]\n"
+            + ("published." if publishing else "ready to upload."),
             border_style="green",
         )
     )
@@ -624,6 +690,32 @@ def self_test() -> int:
 
     assert poll_interval(0) < poll_interval(600) < poll_interval(3000)
 
+    # The dependency rule: an artifact is current when it is newer than
+    # everything it was built from. Checked on files rather than mocked, so
+    # this fails if the mtime comparison is ever flipped.
+    with tempfile.TemporaryDirectory() as tmp:
+        older, newer = Path(tmp) / "a", Path(tmp) / "b"
+        older.write_text("in", encoding="utf-8")
+        os.utime(older, (1_000_000, 1_000_000))
+        newer.write_text("out", encoding="utf-8")
+        os.utime(newer, (2_000_000, 2_000_000))
+        assert newest_mtime([older, newer]) == 2_000_000
+        assert newest_mtime([older]) == 1_000_000
+        assert newest_mtime([]) == 0.0
+        assert newest_mtime([Path(tmp) / "missing"]) == 0.0
+        assert newest_mtime([Path(tmp)]) == 0.0, "a directory is not an input"
+
+    # dist_is_current must refuse anything it cannot see both halves of,
+    # before it ever reaches the mtime or stapler checks.
+    with tempfile.TemporaryDirectory() as tmp:
+        missing_bundle = Path(tmp) / "nope.app"
+        missing_dmg = Path(tmp) / "nope.dmg"
+        assert not dist_is_current(missing_bundle, missing_dmg)
+        missing_bundle.mkdir()
+        assert not dist_is_current(missing_bundle, missing_dmg)
+
+    assert Path(__file__).resolve() in source_inputs(), "the script is its own input"
+
     one = "Developer ID Application: One (AAAAAAAAAA)"
     two = "Developer ID Application: Two (BBBBBBBBBB)"
     real = globals()["find_signing_identities"]
@@ -668,6 +760,11 @@ def main() -> int:
         help="tag v<version> and create a GitHub release with the dmg attached",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="rebuild and re-notarize even when dist/ is already current",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="check the parsing and identity logic, build nothing",
@@ -678,7 +775,7 @@ def main() -> int:
         return self_test()
 
     try:
-        release(args.timeout, args.publish)
+        release(args.timeout, args.publish, args.force)
     except Fail as exc:
         console.print(f"[bad]error:[/bad] {exc}")
         return 1

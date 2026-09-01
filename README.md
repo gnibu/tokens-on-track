@@ -254,9 +254,19 @@ Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
 ```sh
 ./release.py                # dist/TokensOnTrack-<version>.dmg
 ./release.py --publish      # ...and tag v<version>, and put it on GitHub
+./release.py --force        # rebuild even if dist/ is already current
 ./release.py --timeout 90   # allow 90 min per notarization
 ./release.py --self-test    # check the parsing logic, build nothing
 ```
+
+Builds are skipped on make's rule: if everything in `dist/` is newer than
+every file it was built from — `Sources`, `Resources`, `Package.swift`, and
+`release.py` itself — the existing artifacts are reused. What that saves is
+not the compile, which `swift build` already does incrementally in under a
+minute, but the notary queue, which took over an hour on this team's first
+submission. The mtimes are not trusted alone: `stapler validate` has to agree,
+so a run that died between notarizing and stapling is correctly seen as
+unfinished rather than current.
 
 `--publish` tags the current commit `v<version>`, pushes the tag, and creates a
 GitHub release with the dmg attached and generated notes. Its preconditions —
