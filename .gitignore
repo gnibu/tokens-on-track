@@ -5,7 +5,7 @@
 .swiftpm/
 *.app/
 
-# release.sh output
+# release.py output
 dist/
 
 # local signing config (see .env.example)

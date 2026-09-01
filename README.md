@@ -280,8 +280,12 @@ from the keychain, and the notary password never leaves it. `.env` (see
 [`.env.example`](.env.example)) is only for a machine holding more than one
 Developer ID certificate, or a notary profile under a different name.
 
-No install step either — [`uv`](https://docs.astral.sh/uv/) fetches the two
-dependencies from the script's inline PEP 723 metadata on first run.
+No Python environment to set up: [`uv`](https://docs.astral.sh/uv/) fetches
+the two dependencies from the script's inline PEP 723 metadata on first run.
+`uv` itself does have to be installed — `brew install uv`, or the [official
+installer](https://docs.astral.sh/uv/getting-started/installation/) — and
+`setup-signing.sh` checks for it, since a missing interpreter leaves the
+script no way to report its own absence.
 
 Notarization is submitted with `--no-wait` and polled rather than handed to
 `notarytool --wait`, which blocks on a blank line for however long Apple takes.

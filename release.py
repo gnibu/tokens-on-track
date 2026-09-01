@@ -121,13 +121,22 @@ def fail(message: str) -> NoReturn:
 # --------------------------------------------------------------------- #
 # Process helpers
 # --------------------------------------------------------------------- #
-def run(cmd: Sequence[str], *, capture: bool = True) -> str:
-    """Run a command, returning stdout. Raises Fail with the tail of stderr."""
-    proc = subprocess.run(
-        list(cmd),
-        capture_output=capture,
-        text=True,
-    )
+def run(cmd: Sequence[str], *, capture: bool = True, timeout: float | None = None) -> str:
+    """Run a command, returning stdout. Raises Fail with the tail of stderr.
+
+    timeout matters for the polling calls: subprocess.run without one can
+    block forever, and an elapsed-budget check that only runs after the call
+    returns cannot interrupt it. --timeout would then be advisory.
+    """
+    try:
+        proc = subprocess.run(
+            list(cmd),
+            capture_output=capture,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"`{' '.join(cmd[:3])} ...` did not return within {timeout:.0f}s")
     if proc.returncode != 0:
         detail = ((proc.stderr or "") + (proc.stdout or "")).strip() if capture else ""
         tail = "\n".join(detail.splitlines()[-25:])
@@ -222,9 +231,10 @@ def resolve_identity(configured: str) -> str:
 # result; the difference is that a 40-minute queue looks like a 40-minute
 # queue instead of a hung terminal.
 # --------------------------------------------------------------------- #
-def notary_json(args: Sequence[str], profile: str) -> str:
+def notary_json(args: Sequence[str], profile: str, timeout: float | None = None) -> str:
     return run(
-        ["xcrun", "notarytool", *args, "--keychain-profile", profile, "--output-format", "json"]
+        ["xcrun", "notarytool", *args, "--keychain-profile", profile, "--output-format", "json"],
+        timeout=timeout,
     )
 
 
@@ -236,8 +246,8 @@ def submit(target: Path, profile: str) -> SubmitResult:
         fail(f"could not read notarytool's submit response:\n{raw}\n{exc}")
 
 
-def poll(submission_id: str, profile: str) -> SubmissionStatus:
-    raw = notary_json(["info", submission_id], profile)
+def poll(submission_id: str, profile: str, timeout: float | None = None) -> SubmissionStatus:
+    raw = notary_json(["info", submission_id], profile, timeout=timeout)
     try:
         return SubmissionStatus.model_validate_json(raw)
     except ValidationError as exc:
@@ -260,7 +270,6 @@ def notarize(target: Path, label: str, profile: str, timeout_minutes: int) -> No
 
     budget = timeout_minutes * 60
     started = time.monotonic()
-    last_status = ""
 
     with Progress(
         SpinnerColumn(),
@@ -274,11 +283,41 @@ def notarize(target: Path, label: str, profile: str, timeout_minutes: int) -> No
         task = progress.add_task(
             f"waiting on Apple ({label})", total=budget, status="submitted"
         )
+        info: SubmissionStatus | None = None
+        last_status = "submitted"
+        transient = 0
+
         while True:
             elapsed = time.monotonic() - started
             progress.update(task, completed=min(elapsed, budget))
 
-            info = poll(result.id, profile)
+            if elapsed > budget:
+                fail(
+                    f"still {last_status} after {timeout_minutes} min. The submission is\n"
+                    f"queued at Apple regardless — check it later with:\n"
+                    f"  xcrun notarytool info {result.id} --keychain-profile {profile}"
+                )
+
+            try:
+                # Bounded by what is left of the budget, so a wedged notarytool
+                # cannot outlive --timeout by sitting in an unbounded read.
+                info = poll(
+                    result.id, profile, timeout=min(120.0, max(30.0, budget - elapsed))
+                )
+            except Fail as exc:
+                # A blip reaching Apple is not a reason to abandon a submission
+                # that is still queued. Giving up here would send the next run
+                # into a second hour-long queue for a result already coming.
+                transient += 1
+                progress.console.print(
+                    f"    [warn]poll failed ({transient}), retrying[/warn]  "
+                    f"[dim]{str(exc).splitlines()[0]}[/dim]"
+                )
+                progress.update(task, status=f"retrying ({transient})")
+                time.sleep(min(60.0, 5.0 * 2 ** min(transient, 4)))
+                continue
+
+            transient = 0
             if info.status != last_status:
                 stamp = time.strftime("%H:%M:%S")
                 progress.console.print(
@@ -290,13 +329,10 @@ def notarize(target: Path, label: str, profile: str, timeout_minutes: int) -> No
 
             if info.finished:
                 break
-            if elapsed > budget:
-                fail(
-                    f"still {info.status} after {timeout_minutes} min. The submission is\n"
-                    f"queued at Apple regardless — check it later with:\n"
-                    f"  xcrun notarytool info {result.id} --keychain-profile {profile}"
-                )
             time.sleep(poll_interval(elapsed))
+
+    # The loop only leaves by break, which requires a status in hand.
+    assert info is not None
 
     if not info.accepted:
         log = run(
@@ -409,24 +445,46 @@ def verify(bundle: Path, dmg: Path) -> None:
 # both have to agree before the build is skipped.
 # --------------------------------------------------------------------- #
 def newest_mtime(paths: Iterable[Path]) -> float:
-    return max((p.stat().st_mtime for p in paths if p.is_file()), default=0.0)
+    return max((p.stat().st_mtime for p in paths if p.exists()), default=0.0)
 
 
 def source_inputs() -> list[Path]:
     """Everything that changes what the artifacts should contain.
 
-    release.py is in the list because it decides how they are signed — editing
-    the signing flags and reusing yesterday's bundle would produce a release
-    that does not match the script that claims to have made it.
+    Directories are inputs too, not just the files in them. Deleting a source
+    leaves nothing behind with a new mtime, so a files-only scan would happily
+    reuse a binary that still contains the deleted code; unlinking bumps the
+    parent directory instead, which is the only trace there is.
+
+    release.py is here because it decides how the artifacts are signed, and
+    .env because it can decide which certificate signs them.
     """
     roots = [Path("Sources"), Path("Resources")]
-    files = [Path("Package.swift"), Path(__file__).resolve()]
+    inputs = [Path("Package.swift"), Path(__file__).resolve(), Path(".env")]
     for root in roots:
-        files.extend(p for p in root.rglob("*") if p.is_file())
-    return files
+        inputs.append(root)
+        inputs.extend(root.rglob("*"))
+    return inputs
 
 
-def dist_is_current(bundle: Path, dmg: Path) -> bool:
+def signing_authority(target: Path) -> str:
+    """The leaf Authority codesign reports, or "" if the target is unsigned.
+
+    codesign -d writes its report to stderr, and returns non-zero for an
+    unsigned target — neither is an error here, both are answers.
+    """
+    proc = subprocess.run(
+        ["codesign", "-d", "--verbose=2", str(target)],
+        capture_output=True,
+        text=True,
+    )
+    for line in (proc.stderr or "").splitlines():
+        if line.startswith("Authority="):
+            return line.split("=", 1)[1]
+    return ""
+
+
+def dist_is_current(bundle: Path, dmg: Path, identity: str) -> bool:
     if not (bundle.is_dir() and dmg.is_file()):
         return False
 
@@ -434,6 +492,13 @@ def dist_is_current(bundle: Path, dmg: Path) -> bool:
     # whether the pair as a whole predates a source edit.
     built = min(bundle.stat().st_mtime, dmg.stat().st_mtime)
     if built < newest_mtime(source_inputs()):
+        return False
+
+    # Asking the artifacts who signed them, rather than inferring it from the
+    # inputs. A certificate can be renewed, revoked or swapped in the keychain
+    # without any file on disk changing, and publishing yesterday's signature
+    # under today's identity is not something mtimes can catch.
+    if signing_authority(bundle) != identity or signing_authority(dmg) != identity:
         return False
 
     return quiet_ok(["xcrun", "stapler", "validate", str(bundle)]) and quiet_ok(
@@ -568,7 +633,7 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
     bundle = DIST_DIR / f"{APP_NAME}.app"
     dmg = DIST_DIR / f"{ASSET_NAME}-{version}.dmg"
 
-    if not force and dist_is_current(bundle, dmg):
+    if not force and dist_is_current(bundle, dmg, identity):
         step("dist is up to date")
         detail("nothing newer than the last build — reusing it", style="ok")
         detail("rebuild anyway with --force")
@@ -703,18 +768,42 @@ def self_test() -> int:
         assert newest_mtime([older]) == 1_000_000
         assert newest_mtime([]) == 0.0
         assert newest_mtime([Path(tmp) / "missing"]) == 0.0
-        assert newest_mtime([Path(tmp)]) == 0.0, "a directory is not an input"
+
+    # Deleting a source must register, and a directory mtime is the only
+    # trace it leaves. Without this the cache happily serves a binary built
+    # from code that no longer exists.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "Sources"
+        root.mkdir()
+        doomed = root / "Gone.swift"
+        doomed.write_text("// bye", encoding="utf-8")
+        os.utime(root, (1_000_000, 1_000_000))
+        os.utime(doomed, (1_000_000, 1_000_000))
+        before = newest_mtime([root, *root.rglob("*")])
+        doomed.unlink()
+        after = newest_mtime([root, *root.rglob("*")])
+        assert after > before, "deleting a source must bump the directory mtime"
 
     # dist_is_current must refuse anything it cannot see both halves of,
-    # before it ever reaches the mtime or stapler checks.
+    # before it ever reaches the mtime, signature or stapler checks.
     with tempfile.TemporaryDirectory() as tmp:
         missing_bundle = Path(tmp) / "nope.app"
         missing_dmg = Path(tmp) / "nope.dmg"
-        assert not dist_is_current(missing_bundle, missing_dmg)
+        assert not dist_is_current(missing_bundle, missing_dmg, "irrelevant")
         missing_bundle.mkdir()
-        assert not dist_is_current(missing_bundle, missing_dmg)
+        assert not dist_is_current(missing_bundle, missing_dmg, "irrelevant")
 
-    assert Path(__file__).resolve() in source_inputs(), "the script is its own input"
+    # An unsigned path reports no authority, so it can never match an
+    # identity — which is what keeps the signer check from passing vacuously.
+    with tempfile.TemporaryDirectory() as tmp:
+        unsigned = Path(tmp) / "plain.txt"
+        unsigned.write_text("not signed", encoding="utf-8")
+        assert signing_authority(unsigned) == ""
+
+    inputs = source_inputs()
+    assert Path(__file__).resolve() in inputs, "the script is its own input"
+    assert Path(".env") in inputs, ".env can decide which certificate signs"
+    assert Path("Sources") in inputs, "directories carry the deletion signal"
 
     one = "Developer ID Application: One (AAAAAAAAAA)"
     two = "Developer ID Application: Two (BBBBBBBBBB)"
