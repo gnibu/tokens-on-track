@@ -13,3 +13,7 @@ dist/
 
 # never commit a signing key
 *.p12
+
+# byte-compiled release.py, from importing it for diagnostics
+__pycache__/
+*.pyc
