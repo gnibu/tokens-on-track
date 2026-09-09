@@ -30,6 +30,7 @@ enum RegressionTests {
         testPaceReadingIsCapped()
         testTooltipStatesBothReadings()
         testVerdictUsesTargetLanguage()
+        testFullWindowSaysOutOnce()
         testWorkingHoursRedistributeShortWindow()
         testWorkingHoursSwitchBackToWallClock()
         testWorkingHoursSpreadAWeekAcrossAllSelectedHours()
@@ -386,6 +387,32 @@ enum RegressionTests {
         )
         check(!young.contains("of target"), "a young window must not be given a target comparison")
         check(young.contains("3% of the budget"), "the budget is stated either way")
+    }
+
+    private static func testFullWindowSaysOutOnce() {
+        // A spent window: "nearly out" hedges against a bar reading 100%, and
+        // quoting "100% of the 5h window" after "5h window out" says it twice.
+        let spent = UsageWindow(
+            label: "5h",
+            percent: 100,
+            resetsAt: Int(now.timeIntervalSince1970) + 600,
+            windowSeconds: 18_000
+        )
+        let report = Report(providers: [provider(name: "Claude", windows: [spent])], date: now)
+        let verdict = Pace.verdict(report, mode: .budget, timing: wallTiming)
+        check(verdict.headline == "5h window out", "a full window is out, not nearly out, got \(verdict.headline)")
+        check(!verdict.line.contains("100%"), "the line must not repeat the number it just stated, got \(verdict.line)")
+        check(
+            Pace.note(report.providers[0], timing: wallTiming)?.text == "out",
+            "the provider note must agree with the verdict"
+        )
+
+        var nearly = spent
+        nearly.percent = 94
+        let nearlyReport = Report(providers: [provider(name: "Claude", windows: [nearly])], date: now)
+        let nearlyVerdict = Pace.verdict(nearlyReport, mode: .budget, timing: wallTiming)
+        check(nearlyVerdict.headline == "5h window nearly out", "below 100% still hedges, got \(nearlyVerdict.headline)")
+        check(nearlyVerdict.line.contains("94%"), "a hedged line still quotes the number, got \(nearlyVerdict.line)")
     }
 
     private static func testVerdictUsesTargetLanguage() {
