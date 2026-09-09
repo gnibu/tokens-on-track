@@ -339,6 +339,7 @@ enum Pace {
         let window = worst.window
         let tier = severityTier(window, timing: timing)
         let exhausted = tier == 2 && window.percent >= 90
+        let spentWord = spentPhrase(window.percent)
         let reading = readingPhrase(window, mode: mode, timing: timing)
         let basis = target(window, timing: timing)
         let basisSuffix = timing.schedule.enabled
@@ -352,11 +353,15 @@ enum Pace {
         default: short = "On target"
         }
 
+        // "5h window out — 100% of the 5h window" says the same thing twice, so
+        // once the budget reading is what the first half already stated, it goes.
+        let spentLine = spentWord == "out" && mode == .budget
+            ? "\(window.label) window out\(basisSuffix)"
+            : "\(window.label) window \(spentWord) — \(reading)\(basisSuffix)"
+
         return Verdict(
-            headline: exhausted ? "\(window.label) window nearly out" : (tier == 0 ? "On target everywhere" : short),
-            line: exhausted
-                ? "\(window.label) window nearly out — \(reading)\(basisSuffix)"
-                : "\(short) — \(reading)\(basisSuffix)",
+            headline: exhausted ? "\(window.label) window \(spentWord)" : (tier == 0 ? "On target everywhere" : short),
+            line: exhausted ? spentLine : "\(short) — \(reading)\(basisSuffix)",
             detail: "worst: \(worst.provider.name) \(window.label), \(reading)\(basisSuffix)",
             percent: window.percent,
             target: basis?.percent,
@@ -386,6 +391,12 @@ enum Pace {
         return "\(Int(window.percent.rounded()))% of \(phrase(window.label))"
     }
 
+    /// "nearly out" against a bar reading 100% is a hedge the number contradicts.
+    /// Rounded, not exact, so the word agrees with the percentage on screen.
+    private static func spentPhrase(_ percent: Double) -> String {
+        Int(percent.rounded()) >= 100 ? "out" : "nearly out"
+    }
+
     /// Window labels are a mix of periods and durations: "the week" reads, but
     /// "the 5h" does not and needs the noun spelling out.
     private static func phrase(_ label: String) -> String {
@@ -409,7 +420,7 @@ enum Pace {
 
         if worst.percent < 5 { return ("barely touched", .white.opacity(0.45)) }
         switch severityTier(worst, timing: timing) {
-        case 2 where worst.percent >= 90: return ("nearly out", bad)
+        case 2 where worst.percent >= 90: return (spentPhrase(worst.percent), bad)
         case 2: return ("well above target", bad)
         case 1: return ("above target", warn)
         default: return ("on target", good)
