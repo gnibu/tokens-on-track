@@ -8,6 +8,14 @@ refills. Refreshes every 15 minutes, and tells you when you are running hot.
 
 <img src="docs/screenshots/menubar.png" width="163" alt="The menu bar item: a Claude mark with a green ring at 70% marked w, and a second at 53% marked h.">
 
+### [⬇ Download for macOS](https://github.com/gnibu/tokens-on-track/releases/latest/download/TokensOnTrack.dmg)
+
+A signed and notarized `.dmg`. macOS 14+.
+
+---
+
+What it reports, in the dropdown and on the desktop card:
+
 ```
 TOKENS ON TRACK                   05:07
 Claude                             MAX
@@ -33,24 +41,26 @@ spark week  ▓───┃──────    1%  Mon 08:36
 
 ## Install
 
-```sh
-git clone https://github.com/gnibu/ai-usage-widget.git
-cd ai-usage-widget
-./build.sh --install
-```
+1. **[Download the latest `.dmg`](https://github.com/gnibu/tokens-on-track/releases/latest/download/TokensOnTrack.dmg)**, open it, and drag **Tokens on Track**
+   to *Applications*.
+2. Launch it. Approve the notification prompt, and the Keychain prompt if one appears
+   (only Claude's token lives in the Keychain — a Codex-only setup never sees it).
 
-That compiles, wraps the binary in `Tokens on Track.app`, ad-hoc signs it, copies it to
-`/Applications` and launches it. Drop `--install` to build into `.build/` and
-leave `/Applications` alone.
+The download is signed with a Developer ID certificate and notarized by Apple, so
+Gatekeeper does not block it on a Mac that has never seen it. macOS may still ask
+you to confirm the first launch of a downloaded app; that is the ordinary prompt,
+not the *"cannot be opened"* refusal. Nothing to compile, no developer tools needed.
 
-When upgrading from the Python/Übersicht version, `--install` unloads and
-removes its launch agent and widget automatically. Übersicht itself and the
-old pipx package are left installed; remove them separately if no longer used.
+**Requirements:** macOS 14+, and Claude Code and/or Codex already logged in.
+Either provider can be missing — you get a per-provider error rather than a
+failure.
 
-**Requirements:** macOS 14+, Command Line Tools (`xcode-select --install`), and
-Claude Code and/or Codex already logged in. Either provider can be missing — you
-get a per-provider error rather than a failure. Full Xcode is *not* needed;
-there is no `.xcodeproj`, `build.sh` assembles the bundle by hand.
+Prefer to build it yourself? See [Building from source](#building-from-source).
+
+When upgrading from the Python/Übersicht version, run `./build.sh --install` once from a
+[clone](#building-from-source): it unloads and removes that launch agent and widget automatically.
+Übersicht itself and the old pipx package are left installed; remove them
+separately if no longer used.
 
 ## What you get
 
@@ -173,12 +183,20 @@ Worth understanding before running something that touches your API credentials.
   and plan names — nothing secret.
 - Read-only on both credential stores. It never writes or refreshes tokens, so
   it cannot invalidate either CLI's login.
-- No dependencies beyond the system frameworks. There is no supply chain to
-  audit beyond this repo. Read it; it is short.
+- No dependencies beyond the system frameworks. The app's own supply chain is
+  this repo and nothing else. Read it; it is short.
+- **Downloading is a wider trust decision than building.** Take the `.dmg` and you
+  are also trusting the release build and the machine that signed it, which you
+  cannot audit from here. `release.py` itself pulls `rich` and `pydantic` at
+  version ranges. Build from source with `build.sh` if you would rather trust only
+  the code you can read — it needs no network and no third-party package.
 
-**Ad-hoc signing.** The app is signed with an ad-hoc identity, which is enough
-for notifications and the login item but means the signature changes on every
-rebuild. macOS may re-ask for Keychain consent after a rebuild; that is expected.
+**Signing.** The published `.dmg` is signed with a Developer ID Application
+certificate and notarized by Apple; its signature is stable across launches.
+A build you make yourself with `build.sh` is signed with an ad-hoc identity
+instead — enough for notifications and the login item, but the signature changes
+on every rebuild, so macOS may re-ask for Keychain consent after one. That is
+expected for local builds and does not happen with the released app.
 
 ## Troubleshooting
 
@@ -229,6 +247,22 @@ fetch already retries once; a later run generally succeeds.
 
 The header marks a reading `(stale)` once the cache is more than 45 minutes old.
 Hit **Refresh**; if that fails the per-provider error says why.
+
+## Building from source
+
+```sh
+git clone https://github.com/gnibu/tokens-on-track.git
+cd tokens-on-track
+./build.sh --install
+```
+
+That compiles, wraps the binary in `Tokens on Track.app`, ad-hoc signs it, copies
+it to `/Applications` and launches it. Drop `--install` to build into `.build/`
+and leave `/Applications` alone.
+
+**Requirements:** macOS 14+ and Command Line Tools (`xcode-select --install`).
+Full Xcode is *not* needed; there is no `.xcodeproj`, `build.sh` assembles the
+bundle by hand.
 
 ## Releasing
 
