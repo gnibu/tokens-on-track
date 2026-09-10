@@ -556,10 +556,18 @@ def publish(dmg: Path, tag: str, version: str) -> None:
     run(["git", "push", "origin", tag])
     detail(f"tagged {git_out(['rev-parse', '--short', 'HEAD'])}")
 
+    # The same bytes under a second, unversioned name. GitHub resolves
+    # /releases/latest/download/<asset> by exact filename, so only an asset
+    # whose name never changes can be a stable link — which is what the
+    # README's download button points at. Signature and stapled ticket ride
+    # along in the copy; nothing is re-signed.
+    stable = dmg.with_name(f"{ASSET_NAME}.dmg")
+    shutil.copy2(dmg, stable)
+
     try:
         url = run(
             [
-                "gh", "release", "create", tag, str(dmg),
+                "gh", "release", "create", tag, str(dmg), str(stable),
                 "--title", f"{APP_NAME} {version}",
                 "--generate-notes",
             ]
@@ -799,6 +807,16 @@ def self_test() -> int:
         unsigned = Path(tmp) / "plain.txt"
         unsigned.write_text("not signed", encoding="utf-8")
         assert signing_authority(unsigned) == ""
+
+    # The README's download button hardcodes the unversioned asset name.
+    # Rename ASSET_NAME without touching the README and every published
+    # download link 404s — silently, because nothing else reads that URL.
+    readme = Path("README.md")
+    if readme.is_file():
+        stable_url = f"/releases/latest/download/{ASSET_NAME}.dmg"
+        assert stable_url in readme.read_text(encoding="utf-8"), (
+            f"README download link must end in {ASSET_NAME}.dmg"
+        )
 
     inputs = source_inputs()
     assert Path(__file__).resolve() in inputs, "the script is its own input"
