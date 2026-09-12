@@ -43,17 +43,22 @@ struct DesktopUsageCard: View {
 
     var body: some View {
         let timing = timing ?? Pace.Timing(schedule: preferences.workSchedule)
-        let verdict = Pace.verdict(store.report, mode: preferences.percentMode, timing: timing)
+        let display = store.report?.displaying(
+            hiding: preferences.hiddenProviders,
+            hideSpark: preferences.hideCodexSpark
+        )
+        let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
+        let shown = display?.providers ?? []
 
         VStack(alignment: .leading, spacing: 18) {
             header(verdict)
 
-            OutageNotice(report: store.report, size: 12)
+            OutageNotice(providers: shown, size: 12)
 
             Glass.hairline
 
-            if let report = store.report {
-                ForEach(report.providers) { provider in
+            if !shown.isEmpty {
+                ForEach(shown) { provider in
                     ProviderBlock(
                         provider: provider,
                         metrics: .card,
@@ -116,16 +121,21 @@ struct MenuUsageView: View {
 
     var body: some View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
-        let verdict = Pace.verdict(store.report, mode: preferences.percentMode, timing: timing)
+        let display = store.report?.displaying(
+            hiding: preferences.hiddenProviders,
+            hideSpark: preferences.hideCodexSpark
+        )
+        let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
+        let shown = display?.providers ?? []
 
         VStack(alignment: .leading, spacing: 16) {
             summary(verdict)
 
-            OutageNotice(report: store.report, size: 11)
+            OutageNotice(providers: shown, size: 11)
 
-            if let report = store.report {
+            if !shown.isEmpty {
                 VStack(alignment: .leading, spacing: 11) {
-                    ForEach(report.providers) { provider in
+                    ForEach(shown) { provider in
                         ProviderBlock(
                             provider: provider,
                             metrics: .menu,
@@ -183,11 +193,13 @@ struct MenuUsageView: View {
 /// rather than red: a missed poll is a gap in what we know, not a warning about
 /// spending, and the rows below still say everything we do know.
 struct OutageNotice: View {
-    let report: Report?
+    /// Already filtered to what the surface draws — a hidden or never-set-up
+    /// provider is not reported as an outage.
+    let providers: [Provider]
     let size: CGFloat
 
     var body: some View {
-        let down = (report?.providers ?? []).filter { !$0.ok || $0.stale }
+        let down = providers.filter { !$0.ok || $0.stale }
 
         if !down.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
@@ -209,7 +221,10 @@ struct OutageNotice: View {
     /// reading those rows are — otherwise the numbers look current.
     static func line(_ provider: Provider) -> String {
         let reason = provider.error ?? "no reading"
-        guard provider.stale, let measured = provider.measuredAt else {
+        // Only name the reading's age when its rows are actually on screen; a
+        // stale-and-empty provider shows "no recent reading" instead of rows, so
+        // "· rows from …" would point at nothing.
+        guard provider.stale, provider.hasVisibleReading, let measured = provider.measuredAt else {
             return "\(provider.name): \(reason)"
         }
         return "\(provider.name): \(reason) · rows from \(Pace.clockLabel(measured))"
@@ -258,22 +273,29 @@ struct ProviderBlock: View {
                 }
             }
 
-            // A provider with no reading contributes its name and nothing else:
-            // the reason is carried once by `OutageNotice`, above the list.
-            // Carried-over rows are dimmed there, so they cannot be mistaken
-            // for numbers that were just measured.
-            VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
-                ForEach(provider.windows) { window in
-                    UsageRow(
-                        window: window,
-                        metrics: metrics,
-                        mode: mode,
-                        timing: timing,
-                        isWorst: worstRow == Report.rowKey(provider: provider, window: window)
-                    )
+            // A provider whose reading is missing or stale-and-empty shows a
+            // single muted line rather than a row of zeroed-out bars, which read
+            // as broken. The reason and the age are carried once by
+            // `OutageNotice`, above the list. Carried non-zero rows are dimmed
+            // here, so they cannot be mistaken for numbers just measured.
+            if provider.hasVisibleReading {
+                VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+                    ForEach(provider.windows) { window in
+                        UsageRow(
+                            window: window,
+                            metrics: metrics,
+                            mode: mode,
+                            timing: timing,
+                            isWorst: worstRow == Report.rowKey(provider: provider, window: window)
+                        )
+                    }
                 }
+                .opacity(provider.stale ? 0.55 : 1)
+            } else {
+                Text("no recent reading")
+                    .font(.system(size: metrics.labelSize))
+                    .foregroundStyle(Glass.ink(0.4))
             }
-            .opacity(provider.stale ? 0.55 : 1)
         }
     }
 

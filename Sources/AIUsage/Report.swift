@@ -45,6 +45,10 @@ struct Provider: Codable, Identifiable, Equatable {
     var stale: Bool = false
     /// When those carried numbers were actually measured.
     var measuredAt: Int?
+    /// True once the CLI's stored credentials were found. A provider that was
+    /// never set up has nothing worth a row and no logo worth drawing, so it is
+    /// hidden entirely rather than shown as an empty block.
+    var loggedIn: Bool = false
 
     var id: String { name }
 
@@ -56,10 +60,21 @@ struct Provider: Codable, Identifiable, Equatable {
         case windows
         case stale
         case measuredAt = "measured_at"
+        case loggedIn = "logged_in"
     }
 
     init(name: String) {
         self.name = name
+    }
+
+    /// Whether the rows are worth drawing. A stale reading that is all but zero
+    /// carries no information — it says "we last saw nothing", which reads as an
+    /// empty, broken block — so the card shows a "no recent reading" line for it
+    /// instead. A stale *non-zero* reading (say 94%) is still worth carrying.
+    var hasVisibleReading: Bool {
+        guard !windows.isEmpty else { return false }
+        if stale, windows.allSatisfy({ $0.percent < 1 }) { return false }
+        return true
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +86,10 @@ struct Provider: Codable, Identifiable, Equatable {
         windows = (try? box.decode([UsageWindow].self, forKey: .windows)) ?? []
         stale = (try? box.decode(Bool.self, forKey: .stale)) ?? false
         measuredAt = try? box.decodeIfPresent(Int.self, forKey: .measuredAt)
+        // A cache from before this flag existed: an ok reading was necessarily
+        // logged in, so fall back to that rather than hiding it until the first
+        // refresh lands.
+        loggedIn = (try? box.decode(Bool.self, forKey: .loggedIn)) ?? ok
     }
 }
 
@@ -132,15 +151,57 @@ struct Report: Codable, Equatable {
             }
             guard !live.isEmpty else { return provider }
 
+            // A provider we had a reading for recently has "been active": keep it
+            // on screen, dimmed and marked stale, even if its credentials cannot
+            // be read this round. Only a provider we have never seen a reading for
+            // — never set up — is hidden outright.
             var carried = provider
             carried.ok = true
             carried.stale = true
+            carried.loggedIn = true
             carried.plan = provider.plan ?? old.plan
             carried.windows = live
             carried.measuredAt = measured
             return carried
         }
         return merged
+    }
+
+    /// The providers worth drawing: the ones whose CLI is actually set up. A
+    /// provider that was never logged in has no logo and no bars to show, only
+    /// an empty block that reads as broken, so it is left out of every surface.
+    var visibleProviders: [Provider] {
+        providers.filter(\.loggedIn)
+    }
+
+    /// What the reading surfaces actually draw: set-up providers, minus any the
+    /// user has hidden, with the Codex "spark" model buckets dropped on request.
+    /// One filter for the card, the dropdown, the menu bar and the alerts, so a
+    /// hidden provider is hidden everywhere at once.
+    func displayProviders(hiding hiddenNames: Set<String> = [], hideSpark: Bool = false) -> [Provider] {
+        visibleProviders.compactMap { provider in
+            guard !hiddenNames.contains(provider.name) else { return nil }
+            guard hideSpark else { return provider }
+            var trimmed = provider
+            trimmed.windows = provider.windows.filter { !$0.label.lowercased().hasPrefix("spark") }
+            return trimmed
+        }
+    }
+
+    /// The report as the reading surfaces see it, with hidden providers and
+    /// spark rows already removed. Everything that ranks or summarises windows —
+    /// the header verdict, the card's hot glow, the menu bar — runs off this, so
+    /// none of them can speak for a row that is not drawn.
+    func displaying(hiding hiddenNames: Set<String> = [], hideSpark: Bool = false) -> Report {
+        var copy = self
+        copy.providers = displayProviders(hiding: hiddenNames, hideSpark: hideSpark)
+        return copy
+    }
+
+    /// True when any provider reports a "spark" bucket, so the settings pane can
+    /// offer to hide them only when there is something to hide.
+    var hasSparkWindows: Bool {
+        providers.contains { $0.windows.contains { $0.label.lowercased().hasPrefix("spark") } }
     }
 
     /// A reading older than this is shown as stale rather than silently trusted.

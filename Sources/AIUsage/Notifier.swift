@@ -37,8 +37,14 @@ enum Notifier {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
 
         // Carried-over numbers were already judged when they were fresh; a
-        // stale provider must not be able to raise an alert twice.
-        for provider in report.providers where provider.ok && !provider.stale {
+        // stale provider must not be able to raise an alert twice. Hidden
+        // providers and spark rows are left out here too, so nothing off-screen
+        // can raise an alert.
+        let watched = report.displayProviders(
+            hiding: preferences.hiddenProviders,
+            hideSpark: preferences.hideCodexSpark
+        )
+        for provider in watched where provider.ok && !provider.stale {
             for window in provider.windows {
                 let key = "\(provider.name)/\(window.label)"
                 var mark = marks[key] ?? Mark(resetsAt: window.resetsAt)

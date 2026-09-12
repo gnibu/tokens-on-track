@@ -38,6 +38,7 @@ enum Fetcher {
             provider.error = "not logged in"
             return provider
         }
+        provider.loggedIn = true
         provider.plan = oauth["subscriptionType"] as? String
 
         let data: [String: Any]
@@ -84,6 +85,7 @@ enum Fetcher {
             provider.error = "not logged in"
             return provider
         }
+        provider.loggedIn = true
 
         let headers = [
             "Authorization": "Bearer \(token)",

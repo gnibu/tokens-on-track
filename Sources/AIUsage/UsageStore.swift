@@ -108,12 +108,19 @@ final class UsageStore: ObservableObject {
         limit: Int,
         timing: Pace.Timing? = nil
     ) -> [(provider: Provider, window: UsageWindow)] {
+        guard let report else { return [] }
         let timing = timing ?? Pace.Timing(schedule: workSchedule)
-        return report?.busiestWindows(
+        let preferences = Preferences.shared
+        // The bar draws from the same filtered set as the card, so hiding a
+        // provider or the spark rows clears them from the menu bar too.
+        return report.displaying(
+            hiding: preferences.hiddenProviders,
+            hideSpark: preferences.hideCodexSpark
+        ).busiestWindows(
             limit: limit,
-            fairShare: Preferences.shared.menuBarFairShare,
+            fairShare: preferences.menuBarFairShare,
             timing: timing
-        ) ?? []
+        )
     }
 
     func refresh() async {
