@@ -43,11 +43,12 @@ struct DesktopUsageCard: View {
 
     var body: some View {
         let timing = timing ?? Pace.Timing(schedule: preferences.workSchedule)
-        let verdict = Pace.verdict(store.report, mode: preferences.percentMode, timing: timing)
-        let shown = store.report?.displayProviders(
+        let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
             hideSpark: preferences.hideCodexSpark
-        ) ?? []
+        )
+        let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
+        let shown = display?.providers ?? []
 
         VStack(alignment: .leading, spacing: 18) {
             header(verdict)
@@ -120,11 +121,12 @@ struct MenuUsageView: View {
 
     var body: some View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
-        let verdict = Pace.verdict(store.report, mode: preferences.percentMode, timing: timing)
-        let shown = store.report?.displayProviders(
+        let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
             hideSpark: preferences.hideCodexSpark
-        ) ?? []
+        )
+        let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
+        let shown = display?.providers ?? []
 
         VStack(alignment: .leading, spacing: 16) {
             summary(verdict)

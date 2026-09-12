@@ -113,12 +113,10 @@ final class UsageStore: ObservableObject {
         let preferences = Preferences.shared
         // The bar draws from the same filtered set as the card, so hiding a
         // provider or the spark rows clears them from the menu bar too.
-        var filtered = report
-        filtered.providers = report.displayProviders(
+        return report.displaying(
             hiding: preferences.hiddenProviders,
             hideSpark: preferences.hideCodexSpark
-        )
-        return filtered.busiestWindows(
+        ).busiestWindows(
             limit: limit,
             fairShare: preferences.menuBarFairShare,
             timing: timing

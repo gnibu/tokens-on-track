@@ -160,7 +160,11 @@ private struct CardWindowView: View {
 
     var body: some View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
-        let hot = Pace.verdict(store.report, timing: timing).hot
+        let display = store.report?.displaying(
+            hiding: preferences.hiddenProviders,
+            hideSpark: preferences.hideCodexSpark
+        )
+        let hot = Pace.verdict(display, timing: timing).hot
 
         DesktopUsageCard(timing: timing)
             .padding(EdgeInsets(top: 20, leading: 22, bottom: 18, trailing: 22))

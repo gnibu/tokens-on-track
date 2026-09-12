@@ -188,6 +188,16 @@ struct Report: Codable, Equatable {
         }
     }
 
+    /// The report as the reading surfaces see it, with hidden providers and
+    /// spark rows already removed. Everything that ranks or summarises windows —
+    /// the header verdict, the card's hot glow, the menu bar — runs off this, so
+    /// none of them can speak for a row that is not drawn.
+    func displaying(hiding hiddenNames: Set<String> = [], hideSpark: Bool = false) -> Report {
+        var copy = self
+        copy.providers = displayProviders(hiding: hiddenNames, hideSpark: hideSpark)
+        return copy
+    }
+
     /// True when any provider reports a "spark" bucket, so the settings pane can
     /// offer to hide them only when there is something to hide.
     var hasSparkWindows: Bool {
