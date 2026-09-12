@@ -125,6 +125,21 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(refreshMinutes, forKey: Keys.refreshMinutes) }
     }
 
+    /// Providers the user has chosen not to see, by name. A never-set-up
+    /// provider is hidden automatically; this is for hiding one you *do* have.
+    @Published var hiddenProviders: Set<String> {
+        didSet { defaults.set(Array(hiddenProviders), forKey: Keys.hiddenProviders) }
+    }
+
+    /// Drop Codex's per-model "spark" quota rows, which some users never touch.
+    @Published var hideCodexSpark: Bool {
+        didSet { defaults.set(hideCodexSpark, forKey: Keys.hideCodexSpark) }
+    }
+
+    func setProvider(_ name: String, hidden: Bool) {
+        if hidden { hiddenProviders.insert(name) } else { hiddenProviders.remove(name) }
+    }
+
     private enum Keys {
         static let showLogo = "showLogoInMenuBar"
         static let showGauge = "showGaugeInMenuBar"
@@ -145,6 +160,8 @@ final class Preferences: ObservableObject {
         static let paceThreshold = "paceThreshold"
         static let paceAlerts = "paceAlertsEnabled"
         static let refreshMinutes = "refreshMinutes"
+        static let hiddenProviders = "hiddenProviders"
+        static let hideCodexSpark = "hideCodexSpark"
     }
 
     private init() {
@@ -172,6 +189,7 @@ final class Preferences: ObservableObject {
             Keys.paceThreshold: 1.5,
             Keys.paceAlerts: true,
             Keys.refreshMinutes: 15.0,
+            Keys.hideCodexSpark: false,
         ])
         showLogoInMenuBar = defaults.bool(forKey: Keys.showLogo)
         showGaugeInMenuBar = defaults.bool(forKey: Keys.showGauge)
@@ -197,6 +215,8 @@ final class Preferences: ObservableObject {
         paceThreshold = defaults.double(forKey: Keys.paceThreshold)
         paceAlertsEnabled = defaults.bool(forKey: Keys.paceAlerts)
         refreshMinutes = defaults.double(forKey: Keys.refreshMinutes)
+        hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
+        hideCodexSpark = defaults.bool(forKey: Keys.hideCodexSpark)
     }
 
     /// The last selected weekday cannot be removed: an enabled empty schedule

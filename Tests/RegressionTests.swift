@@ -20,6 +20,9 @@ enum RegressionTests {
         testWindowInitialSkipsDigits()
         testMenuBarItemIsNeverZeroWidth()
         testStrayArgumentAfterCloseIsRejected()
+        testNotLoggedInProviderIsHidden()
+        testHiddenProviderAndSparkWindowsAreFiltered()
+        testRecentlyActiveProviderStaysVisibleWhenUnreadable()
         testFailedPollKeepsTheLastReading()
         testCarriedReadingIsDroppedOnceItIsOld()
         testCarriedWindowIsDroppedOnceItHasReset()
@@ -226,12 +229,65 @@ enum RegressionTests {
         check(StatusIcon.windowInitial("30") == nil, "a label with no letters gets no mark")
     }
 
+    private static func testNotLoggedInProviderIsHidden() {
+        var absent = Provider(name: "Codex")
+        absent.error = "not logged in"
+        let report = Report(
+            providers: [provider(name: "Claude", windows: [window(percent: 40, elapsedPercent: 50)]), absent],
+            date: now
+        )
+        check(
+            report.visibleProviders.map(\.name) == ["Claude"],
+            "a provider that was never logged in must not be shown"
+        )
+    }
+
+    private static func testHiddenProviderAndSparkWindowsAreFiltered() {
+        var codex = provider(name: "Codex", windows: [
+            window(percent: 10, elapsedPercent: 50),
+        ])
+        codex.windows.append(UsageWindow(label: "spark 5h", percent: 0, resetsAt: nil, windowSeconds: 5 * 3600))
+        codex.windows.append(UsageWindow(label: "spark week", percent: 0, resetsAt: nil, windowSeconds: 7 * 86400))
+        let claude = provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])
+        let report = Report(providers: [claude, codex], date: now)
+
+        check(report.hasSparkWindows, "a spark bucket must be detectable for the settings switch")
+
+        let hidClaude = report.displayProviders(hiding: ["Claude"], hideSpark: false)
+        check(hidClaude.map(\.name) == ["Codex"], "a hidden provider must be dropped")
+
+        let noSpark = report.displayProviders(hideSpark: true)
+        let codexRows = noSpark.first { $0.name == "Codex" }?.windows.map(\.label)
+        check(codexRows == ["10.0"], "spark rows must be dropped, the main window kept")
+    }
+
+    private static func testRecentlyActiveProviderStaysVisibleWhenUnreadable() {
+        let good = Report(
+            providers: [provider(name: "Codex", windows: [window(percent: 40, elapsedPercent: 50)])],
+            date: now
+        )
+        // Credentials unreadable this round, but Codex has been active: it is
+        // partially shown (carried, dimmed), not hidden as if never set up.
+        var unreadable = Provider(name: "Codex")
+        unreadable.error = "not logged in"
+        let later = now.addingTimeInterval(300)
+        let merged = Report(providers: [unreadable], date: later).carryingOver(from: good, now: later)
+
+        check(merged.providers[0].ok, "a recently-active provider keeps its last reading")
+        check(merged.providers[0].stale, "the carried reading is marked stale")
+        check(
+            merged.visibleProviders.map(\.name) == ["Codex"],
+            "a provider that has been active must stay on screen, not vanish"
+        )
+    }
+
     private static func testFailedPollKeepsTheLastReading() {
         let good = Report(
             providers: [provider(name: "Claude", windows: [window(percent: 40, elapsedPercent: 50)])],
             date: now
         )
         var failed = Provider(name: "Claude")
+        failed.loggedIn = true
         failed.error = "stored token went stale — run claude once to refresh it"
         // Inside the carried window's own life: a window that has reset is a
         // separate case, and `testCarriedWindowIsDroppedOnceItHasReset` has it.
@@ -253,6 +309,7 @@ enum RegressionTests {
         )
         let later = now.addingTimeInterval(Report.carryLimit + 60)
         var failed = Provider(name: "Claude")
+        failed.loggedIn = true
         failed.error = "the service is not answering (http 503)"
         let merged = Report(providers: [failed], date: later).carryingOver(from: good, now: later)
 
@@ -280,6 +337,7 @@ enum RegressionTests {
 
         let later = now.addingTimeInterval(120)
         var failed = Provider(name: "Claude")
+        failed.loggedIn = true
         failed.error = "stored token went stale — run claude once"
         let merged = Report(providers: [failed], date: later).carryingOver(from: good, now: later)
 
@@ -687,6 +745,7 @@ enum RegressionTests {
     private static func provider(name: String, windows: [UsageWindow]) -> Provider {
         var provider = Provider(name: name)
         provider.ok = true
+        provider.loggedIn = true
         provider.windows = windows
         return provider
     }

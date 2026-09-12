@@ -94,6 +94,7 @@ private struct SettingsTab: View {
                 VStack(alignment: .leading, spacing: 14) {
                     menuBarGroup
                     displayGroup
+                    providersGroup
                     workingHoursGroup
                     alertsGroup
                     refreshGroup
@@ -214,6 +215,49 @@ private struct SettingsTab: View {
                             let actual = preferences.setOpensAtLogin(wanted)
                             if actual != wanted { opensAtLogin = actual }
                         }
+                }
+            }
+        }
+    }
+
+    /// Show/hide each set-up provider, and Codex's spark rows. Only the
+    /// providers we actually have credentials for get a switch — there is no
+    /// sense offering to hide one that was never installed.
+    @ViewBuilder
+    private var providersGroup: some View {
+        let known = (store.report?.providers ?? []).filter(\.loggedIn)
+
+        if !known.isEmpty {
+            Group {
+                groupTitle("Providers")
+
+                DividedRows {
+                    ForEach(known) { provider in
+                        SettingRow(title: "Show \(provider.name)") {
+                            GlassSwitch(isOn: Binding(
+                                get: { !preferences.hiddenProviders.contains(provider.name) },
+                                set: { shown in
+                                    preferences.setProvider(provider.name, hidden: !shown)
+                                    store.iconPreferenceChanged()
+                                }
+                            ))
+                        }
+                    }
+
+                    if store.report?.hasSparkWindows == true {
+                        SettingRow(
+                            title: "Show Codex Spark",
+                            subtitle: "the per-model spark quota rows"
+                        ) {
+                            GlassSwitch(isOn: Binding(
+                                get: { !preferences.hideCodexSpark },
+                                set: { shown in
+                                    preferences.hideCodexSpark = !shown
+                                    store.iconPreferenceChanged()
+                                }
+                            ))
+                        }
+                    }
                 }
             }
         }
