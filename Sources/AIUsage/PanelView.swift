@@ -85,6 +85,13 @@ private struct SettingsTab: View {
     @EnvironmentObject private var store: UsageStore
     @ObservedObject private var preferences = Preferences.shared
     @State private var opensAtLogin = Preferences.shared.opensAtLogin
+    @State private var editingOpenRouterKey = false
+    @State private var openRouterKey = ""
+    @State private var openRouterKeyError: String?
+    @State private var openRouterBudgetError: String?
+    @State private var openRouterBudgetText = Preferences.shared.openRouterMonthlyBudget
+        .map(SettingsTab.editableBudget)
+        ?? ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -94,6 +101,7 @@ private struct SettingsTab: View {
                 VStack(alignment: .leading, spacing: 14) {
                     menuBarGroup
                     displayGroup
+                    openRouterGroup
                     providersGroup
                     workingHoursGroup
                     alertsGroup
@@ -218,6 +226,188 @@ private struct SettingsTab: View {
                 }
             }
         }
+    }
+
+    private var openRouterGroup: some View {
+        Group {
+            groupTitle("OpenRouter")
+
+            DividedRows {
+                SettingRow(
+                    title: "Connection",
+                    subtitle: openRouterConnectionSubtitle
+                ) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(openRouterConnectionColor)
+                            .frame(width: 6, height: 6)
+                        Text(openRouterConnectionLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Glass.ink(0.72))
+                    }
+                }
+
+                SettingRow(
+                    title: "API key",
+                    subtitle: openRouterKeyError ?? (store.hasSavedOpenRouterKey
+                        ? "saved in this Mac's Keychain"
+                        : "automatic when OpenCode or Conductor exposes one")
+                ) {
+                    if editingOpenRouterKey {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            SecureField("sk-or-…", text: $openRouterKey)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11).monospaced())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .frame(width: 150)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(Color.black.opacity(0.25))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.14))
+                                )
+
+                            HStack(spacing: 10) {
+                                GlassLink(title: "Cancel") {
+                                    editingOpenRouterKey = false
+                                    openRouterKey = ""
+                                    openRouterKeyError = nil
+                                }
+                                GlassButton(label: "Save", enabled: !openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                    saveOpenRouterKey()
+                                }
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            if store.hasSavedOpenRouterKey {
+                                GlassLink(title: "Remove") {
+                                    Task {
+                                        if await store.removeOpenRouterKey() {
+                                            openRouterKeyError = nil
+                                        } else {
+                                            openRouterKeyError = "Could not remove the key from Keychain"
+                                        }
+                                    }
+                                }
+                            }
+                            GlassButton(label: store.hasSavedOpenRouterKey ? "Replace…" : "Add key…") {
+                                editingOpenRouterKey = true
+                                openRouterKeyError = nil
+                            }
+                        }
+                    }
+                }
+
+                SettingRow(
+                    title: "Monthly budget",
+                    subtitle: openRouterBudgetError ?? "USD · daily allowance is derived automatically"
+                ) {
+                    HStack(spacing: 4) {
+                        Text("$")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Glass.ink(0.55))
+                        TextField("20", text: $openRouterBudgetText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12).monospacedDigit())
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 64)
+                            .onChange(of: openRouterBudgetText) { _, value in
+                                setOpenRouterBudget(value)
+                            }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.black.opacity(0.25))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14))
+                    )
+                }
+
+                SettingRow(
+                    title: "Dollar values",
+                    subtitle: "show spend and allowance below each usage row"
+                ) {
+                    GlassSwitch(isOn: $preferences.showOpenRouterCosts)
+                        .onChange(of: preferences.showOpenRouterCosts) { _, _ in
+                            store.iconPreferenceChanged()
+                        }
+                }
+            }
+        }
+    }
+
+    private var openRouterProvider: Provider? {
+        store.report?.providers.first(where: { $0.name == "OpenRouter" })
+    }
+
+    private var openRouterConnectionLabel: String {
+        guard let provider = openRouterProvider, provider.credentialSource != nil else {
+            return "Not connected"
+        }
+        if provider.error?.contains("rejected") == true { return "Rejected" }
+        return "Connected"
+    }
+
+    private var openRouterConnectionSubtitle: String {
+        guard let provider = openRouterProvider else { return "No OpenRouter credential found" }
+        var parts: [String] = []
+        if let source = provider.credentialSource { parts.append(source.rawValue) }
+        if let error = provider.error, error != OpenRouterBudget.missingBudgetMessage {
+            parts.append(error)
+        }
+        return parts.isEmpty ? "No OpenRouter credential found" : parts.joined(separator: " · ")
+    }
+
+    private var openRouterConnectionColor: Color {
+        guard let provider = openRouterProvider, provider.credentialSource != nil else {
+            return Color.white.opacity(0.3)
+        }
+        return provider.error?.contains("rejected") == true ? Pace.warn : Pace.good
+    }
+
+    private func saveOpenRouterKey() {
+        let key = openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            if await store.saveOpenRouterKey(key) {
+                editingOpenRouterKey = false
+                openRouterKey = ""
+                openRouterKeyError = nil
+            } else {
+                openRouterKeyError = "Could not save the key in Keychain"
+            }
+        }
+    }
+
+    /// The field is an input, not a readout: seed it with the value exactly as
+    /// stored so the next keystroke cannot persist a display-rounded budget.
+    private static func editableBudget(_ value: Double) -> String {
+        var text = String(value)
+        if text.hasSuffix(".0") { text.removeLast(2) }
+        return text
+    }
+
+    private func setOpenRouterBudget(_ text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            preferences.openRouterMonthlyBudget = nil
+            openRouterBudgetError = nil
+            return
+        }
+        let normalized = value.replacingOccurrences(of: ",", with: ".")
+        guard let budget = Double(normalized), budget.isFinite, budget > 0 else {
+            openRouterBudgetError = "Enter a positive USD amount"
+            return
+        }
+        openRouterBudgetError = nil
+        preferences.openRouterMonthlyBudget = budget
     }
 
     /// Show/hide each set-up provider, and Codex's spark rows. Only the

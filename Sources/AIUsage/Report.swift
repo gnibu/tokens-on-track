@@ -8,6 +8,10 @@ struct UsageWindow: Codable, Identifiable, Equatable {
     var percent: Double
     var resetsAt: Int?
     var windowSeconds: Int?
+    /// Present only for cost-backed providers such as OpenRouter. Percentages
+    /// remain the common currency used by ranking and pacing.
+    var spentUSD: Double?
+    var budgetUSD: Double?
 
     var id: String { label }
 
@@ -24,13 +28,24 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         case percent
         case resetsAt = "resets_at"
         case windowSeconds = "window_seconds"
+        case spentUSD = "spent_usd"
+        case budgetUSD = "budget_usd"
     }
 
-    init(label: String, percent: Double, resetsAt: Int? = nil, windowSeconds: Int? = nil) {
+    init(
+        label: String,
+        percent: Double,
+        resetsAt: Int? = nil,
+        windowSeconds: Int? = nil,
+        spentUSD: Double? = nil,
+        budgetUSD: Double? = nil
+    ) {
         self.label = label
         self.percent = percent
         self.resetsAt = resetsAt
         self.windowSeconds = windowSeconds
+        self.spentUSD = spentUSD
+        self.budgetUSD = budgetUSD
     }
 
     init(from decoder: Decoder) throws {
@@ -39,6 +54,8 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         percent = (try? box.decode(Double.self, forKey: .percent)) ?? 0
         resetsAt = try? box.decodeIfPresent(Int.self, forKey: .resetsAt)
         windowSeconds = try? box.decodeIfPresent(Int.self, forKey: .windowSeconds)
+        spentUSD = try? box.decodeIfPresent(Double.self, forKey: .spentUSD)
+        budgetUSD = try? box.decodeIfPresent(Double.self, forKey: .budgetUSD)
     }
 }
 
@@ -74,6 +91,9 @@ struct Provider: Codable, Identifiable, Equatable {
     /// never set up has nothing worth a row and no logo worth drawing, so it is
     /// hidden entirely rather than shown as an empty block.
     var loggedIn: Bool = false
+    /// Non-secret origin of the credential that produced this reading. It is
+    /// shown in Settings and harmless in the cache.
+    var credentialSource: OpenRouterCredential.Source?
 
     var id: String { name }
 
@@ -86,6 +106,7 @@ struct Provider: Codable, Identifiable, Equatable {
         case stale
         case measuredAt = "measured_at"
         case loggedIn = "logged_in"
+        case credentialSource = "credential_source"
     }
 
     init(name: String) {
@@ -97,9 +118,15 @@ struct Provider: Codable, Identifiable, Equatable {
     /// empty, broken block — so the card shows a "no recent reading" line for it
     /// instead. A stale *non-zero* reading (say 94%) is still worth carrying.
     var hasVisibleReading: Bool {
-        guard !windows.isEmpty else { return false }
+        guard ok, !windows.isEmpty else { return false }
         if stale, windows.allSatisfy({ $0.percent < 1 }) { return false }
         return true
+    }
+
+    /// The warning remains useful, but an empty provider block underneath it
+    /// only repeats that setup is incomplete.
+    var needsOpenRouterBudget: Bool {
+        name == "OpenRouter" && error == OpenRouterBudget.missingBudgetMessage
     }
 
     init(from decoder: Decoder) throws {
@@ -115,6 +142,7 @@ struct Provider: Codable, Identifiable, Equatable {
         // logged in, so fall back to that rather than hiding it until the first
         // refresh lands.
         loggedIn = (try? box.decode(Bool.self, forKey: .loggedIn)) ?? ok
+        credentialSource = try? box.decodeIfPresent(OpenRouterCredential.Source.self, forKey: .credentialSource)
     }
 }
 
@@ -228,6 +256,48 @@ struct Report: Codable, Equatable {
     ) -> Report {
         var copy = self
         copy.providers = displayProviders(hiding: hiddenNames, hidingSpark: hiddenSpark)
+        return copy
+    }
+
+    /// Rebuild cost-backed percentages from cached dollars when the local
+    /// budget changes. No provider call is required, and preference edits do
+    /// not masquerade as a freshly measured report.
+    func rebudgetingOpenRouter(monthlyBudget: Double?, now: Date = Date()) -> Report {
+        var copy = self
+        guard let index = copy.providers.firstIndex(where: { $0.name == "OpenRouter" }) else {
+            return copy
+        }
+        var provider = copy.providers[index]
+        let daily = provider.windows.first(where: { $0.label == "day" })?.spentUSD
+        let monthly = provider.windows.first(where: { $0.label == "month" })?.spentUSD
+        guard let daily, let monthly else { return copy }
+
+        guard let budget = monthlyBudget, budget.isFinite, budget > 0 else {
+            provider.ok = false
+            provider.stale = false
+            provider.plan = nil
+            provider.error = OpenRouterBudget.missingBudgetMessage
+            provider.windows = OpenRouterBudget.unbudgetedWindows(
+                dailySpend: daily,
+                monthlySpend: monthly,
+                now: now
+            )
+            copy.providers[index] = provider
+            return copy
+        }
+
+        provider.plan = OpenRouterBudget.plan(budget)
+        provider.windows = OpenRouterBudget.windows(
+            dailySpend: daily,
+            monthlySpend: monthly,
+            monthlyBudget: budget,
+            now: now
+        )
+        if provider.error == OpenRouterBudget.missingBudgetMessage {
+            provider.ok = true
+            provider.error = nil
+        }
+        copy.providers[index] = provider
         return copy
     }
 

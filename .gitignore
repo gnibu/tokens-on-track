@@ -20,3 +20,6 @@ __pycache__/
 
 # MCP server config, copied in per-workspace by Conductor
 .mcp.json
+
+# Local brainstorming server state and artifacts
+.superpowers/

@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Reads OAuth credentials already stored on the machine by the two CLIs:
+/// Reads credentials already stored on the machine by the provider CLIs:
 ///   - Claude Code: macOS Keychain item "Claude Code-credentials"
 ///   - Codex:       ~/.codex/auth.json
 ///
@@ -12,14 +12,16 @@ enum Fetcher {
     static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     static let codexAuthPath = ("~/.codex/auth.json" as NSString).expandingTildeInPath
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
+    static let openRouterUsageURL = URL(string: "https://openrouter.ai/api/v1/key")!
     static let codexUserAgent = "codex_cli_rs/0.56.0 (Mac OS 26.4.0; arm64) Terminal"
 
     static let timeout: TimeInterval = 20
 
-    static func fetchAll() async -> Report {
+    static func fetchAll(openRouterMonthlyBudget: Double?) async -> Report {
         async let claude = fetchClaude()
         async let codex = fetchCodex()
-        return await Report(providers: [claude, codex])
+        async let openRouter = fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
+        return await Report(providers: [claude, codex, openRouter])
     }
 
     // ----------------------------------------------------------------- //
@@ -139,6 +141,127 @@ enum Fetcher {
             ))
         }
         return out.sorted { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? 0) }
+    }
+
+    // ----------------------------------------------------------------- //
+    // OpenRouter
+    // ----------------------------------------------------------------- //
+
+    static func fetchOpenRouter(monthlyBudget: Double?) async -> Provider {
+        var provider = Provider(name: "OpenRouter")
+        let candidates = openRouterCandidates()
+        guard !candidates.isEmpty else {
+            provider.error = "not connected"
+            return provider
+        }
+        provider.loggedIn = true
+
+        var response: [String: Any]?
+        for candidate in candidates {
+            provider.credentialSource = candidate.source
+            do {
+                response = try await getJSONRetrying(openRouterUsageURL, headers: [
+                    "Authorization": "Bearer \(candidate.key)",
+                    "Accept": "application/json",
+                    "User-Agent": "Tokens-on-Track",
+                ])
+                break
+            } catch let error as HTTPStatus where error.code == 401 && !candidate.authoritative {
+                // A stale automatically-discovered credential should not mask a
+                // later live one, particularly with several Conductor agents.
+                continue
+            } catch let error as HTTPStatus {
+                provider.error = openRouterNote(for: error.code, manual: candidate.authoritative)
+                return provider
+            } catch {
+                provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+                return provider
+            }
+        }
+
+        guard let data = response?["data"] as? [String: Any] else {
+            provider.error = "stored key was rejected"
+            return provider
+        }
+
+        // A response without the spend counters cannot be turned into a reading.
+        // Defaulting them to zero would draw a healthy 0% out of a malformed
+        // payload, so the absence is an error rather than a value.
+        guard let daily = (data["usage_daily"] as? NSNumber)?.doubleValue,
+              let monthly = (data["usage_monthly"] as? NSNumber)?.doubleValue
+        else {
+            provider.error = "no spend data"
+            return provider
+        }
+
+        guard let budget = monthlyBudget, budget.isFinite, budget > 0 else {
+            provider.windows = OpenRouterBudget.unbudgetedWindows(
+                dailySpend: daily,
+                monthlySpend: monthly
+            )
+            provider.error = OpenRouterBudget.missingBudgetMessage
+            return provider
+        }
+
+        provider.plan = OpenRouterBudget.plan(budget)
+        provider.windows = OpenRouterBudget.windows(
+            dailySpend: daily,
+            monthlySpend: monthly,
+            monthlyBudget: budget
+        )
+        provider.ok = true
+        return provider
+    }
+
+    private static func openRouterCandidates() -> [OpenRouterCredential.Candidate] {
+        var candidates: [OpenRouterCredential.Candidate] = []
+        if let key = OpenRouterKeychain.read() {
+            candidates.append(.init(key: key, source: .keychain, authoritative: true))
+        }
+        if let raw = FileManager.default.contents(atPath: OpenRouterCredential.openCodeAuthPath),
+           let key = OpenRouterCredential.key(inOpenCodeAuth: raw) {
+            candidates.append(.init(key: key, source: .openCode, authoritative: false))
+        }
+        if let key = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !key.isEmpty {
+            candidates.append(.init(key: key, source: .environment, authoritative: false))
+        }
+        candidates += conductorOpenRouterKeys().map {
+            .init(key: $0, source: .conductor, authoritative: false)
+        }
+
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0.key).inserted }
+    }
+
+    /// Conductor injects provider keys into its managed OpenCode child rather
+    /// than OpenCode's normal auth file. There is no public credential API, so
+    /// this same-user process lookup is intentionally a last, transient resort.
+    private static func conductorOpenRouterKeys() -> [String] {
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
+            timeout: 5
+        ), let list = String(data: raw, encoding: .utf8)
+        else { return [] }
+
+        return OpenRouterCredential.conductorPIDs(in: list).compactMap { pid in
+            guard let raw = runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["eww", "-p", String(pid), "-o", "command="],
+                timeout: 5
+            ), let environment = String(data: raw, encoding: .utf8)
+            else { return nil }
+            return OpenRouterCredential.key(inProcessEnvironment: environment)
+        }
+    }
+
+    private static func openRouterNote(for code: Int, manual: Bool) -> String {
+        switch code {
+        case 401: return manual ? "key rejected — update it in Settings" : "stored key was rejected"
+        case 429: return "rate limited — the reading will catch up"
+        case 500...599: return "the service is not answering (http \(code))"
+        default: return "http \(code)"
+        }
     }
 
     // ----------------------------------------------------------------- //
