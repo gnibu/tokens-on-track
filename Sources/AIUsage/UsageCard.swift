@@ -45,7 +45,7 @@ struct DesktopUsageCard: View {
         let timing = timing ?? Pace.Timing(schedule: preferences.workSchedule)
         let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
-            hideSpark: preferences.hideCodexSpark
+            hidingSpark: preferences.hiddenSpark
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
@@ -123,7 +123,7 @@ struct MenuUsageView: View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
         let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
-            hideSpark: preferences.hideCodexSpark
+            hidingSpark: preferences.hiddenSpark
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []

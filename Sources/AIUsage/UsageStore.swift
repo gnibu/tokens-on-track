@@ -115,7 +115,7 @@ final class UsageStore: ObservableObject {
         // provider or the spark rows clears them from the menu bar too.
         return report.displaying(
             hiding: preferences.hiddenProviders,
-            hideSpark: preferences.hideCodexSpark
+            hidingSpark: preferences.hiddenSpark
         ).busiestWindows(
             limit: limit,
             fairShare: preferences.menuBarFairShare,

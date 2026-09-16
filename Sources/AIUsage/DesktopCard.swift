@@ -162,7 +162,7 @@ private struct CardWindowView: View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
         let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
-            hideSpark: preferences.hideCodexSpark
+            hidingSpark: preferences.hiddenSpark
         )
         let hot = Pace.verdict(display, timing: timing).hot
 

@@ -244,15 +244,30 @@ private struct SettingsTab: View {
                         }
                     }
 
-                    if store.report?.hasSparkWindows == true {
+                    if store.report?.hasSparkSession == true {
                         SettingRow(
-                            title: "Show Codex Spark",
-                            subtitle: "the per-model spark quota rows"
+                            title: "Show Codex Spark 5h",
+                            subtitle: "the per-model session row"
                         ) {
                             GlassSwitch(isOn: Binding(
-                                get: { !preferences.hideCodexSpark },
+                                get: { !preferences.hideSparkSession },
                                 set: { shown in
-                                    preferences.hideCodexSpark = !shown
+                                    preferences.hideSparkSession = !shown
+                                    store.iconPreferenceChanged()
+                                }
+                            ))
+                        }
+                    }
+
+                    if store.report?.hasSparkWeekly == true {
+                        SettingRow(
+                            title: "Show Codex Spark week",
+                            subtitle: "the per-model weekly row"
+                        ) {
+                            GlassSwitch(isOn: Binding(
+                                get: { !preferences.hideSparkWeek },
+                                set: { shown in
+                                    preferences.hideSparkWeek = !shown
                                     store.iconPreferenceChanged()
                                 }
                             ))

@@ -42,7 +42,7 @@ enum Notifier {
         // can raise an alert.
         let watched = report.displayProviders(
             hiding: preferences.hiddenProviders,
-            hideSpark: preferences.hideCodexSpark
+            hidingSpark: preferences.hiddenSpark
         )
         for provider in watched where provider.ok && !provider.stale {
             for window in provider.windows {
