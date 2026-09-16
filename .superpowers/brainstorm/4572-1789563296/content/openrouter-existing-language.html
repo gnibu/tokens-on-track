@@ -1,0 +1,69 @@
+<style>
+  .tot-shell { display:grid; grid-template-columns:minmax(500px,1.3fr) minmax(330px,.8fr); gap:22px; align-items:start; }
+  .tot-panel { background:linear-gradient(145deg,#30383d,#1c282f); border:1px solid #728087; border-radius:28px; padding:24px 26px; color:#f7f7f5; box-shadow:0 22px 55px #0008,inset 0 1px #ffffff33; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  .tot-tabs { display:grid; grid-template-columns:1fr 1fr 44px; gap:4px; background:#172229; border-radius:17px; padding:3px; margin-bottom:22px; }
+  .tot-tab { text-align:center; padding:11px; color:#9ca2a5; font-weight:700; }
+  .tot-tab.active { background:#657076; color:white; border-radius:14px; }
+  .refresh { display:grid; place-items:center; font-size:22px; border:1px solid #8b959a; border-radius:14px; }
+  .summary { display:flex; align-items:center; gap:14px; padding:18px; background:#ffffff10; border:1px solid #ffffff2c; border-radius:22px; margin-bottom:22px; }
+  .ring { width:48px; height:48px; border:9px solid #59676c; border-top-color:#66d39a; border-right-color:#66d39a; border-radius:50%; transform:rotate(-35deg); }
+  .summary b { display:block; font-size:23px; }.muted { color:#9ba2a5; }.summary .muted { font-size:16px;font-weight:650;margin-top:3px; }
+  .provider { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:11px; margin:18px 0 12px; }
+  .or-mark { width:27px;height:27px;border-radius:50%;display:grid;place-items:center;border:2px solid #f2f2ee;font-weight:800;font-size:12px;letter-spacing:-1px; }
+  .provider-name { font-size:23px;font-weight:760; }.pill { background:#ffffff2a;border-radius:9px;padding:5px 9px;font-size:13px;font-weight:750;letter-spacing:1.3px;color:#d5d7d6; }
+  .today-cost { color:#66d39a;font-size:14px;font-weight:700; }
+  .usage-row { display:grid;grid-template-columns:115px minmax(170px,1fr) 54px 88px;gap:12px;align-items:center;margin:12px 0;color:#aeb4b6;font-size:17px;font-weight:650; }
+  .row-label strong { color:#f7f7f5;display:block;font-size:16px; }.row-label small { display:block;color:#8f999d;font-size:12px;margin-top:1px; }
+  .track { height:14px;border-radius:7px;background:#172229;position:relative;overflow:visible; }
+  .fill { height:100%;min-width:9px;border-radius:7px;background:linear-gradient(90deg,#58c98b,#85e3af);box-shadow:0 0 12px #54ca8760; }
+  .target { position:absolute;left:48%;top:-4px;width:3px;height:22px;border-radius:2px;background:#dedfdd; }
+  .pct { color:white;font-size:18px;text-align:right; }.reset { text-align:right;color:#9ba2a5;font-size:15px; }
+  .foot { display:flex;justify-content:space-between;margin-top:23px;color:#899397;font-size:14px;font-weight:650; }
+  .settings h3 { margin:0 0 5px;color:white; }.settings .sub { color:#a1a8aa;font-size:14px;margin-bottom:18px; }
+  .setting { padding:15px 0;border-top:1px solid #ffffff16;display:flex;gap:14px;align-items:center;justify-content:space-between; }
+  .setting:first-of-type { border-top:0; }.setting b { display:block;font-size:15px; }.setting small { color:#929b9e;display:block;margin-top:4px;line-height:1.35; }
+  .value { flex:0 0 auto;min-width:105px;text-align:right;color:white;font-weight:700;background:#121d23;border:1px solid #68747a;border-radius:10px;padding:9px 11px; }
+  .status { color:#69d69c;font-weight:750;white-space:nowrap; }.button { color:white;font-weight:700;border:1px solid #758087;border-radius:10px;padding:8px 10px;white-space:nowrap; }
+  .choice { margin-top:20px;background:#19242a;border:1px solid #718087;border-radius:14px;padding:14px 16px;text-align:center;font-weight:750;cursor:pointer; }
+  .choice:hover { border-color:#81dbaa; }.choice.selected { background:#244d3b;border-color:#67d49a; }
+  @media(max-width:900px){.tot-shell{grid-template-columns:1fr}.usage-row{grid-template-columns:100px 1fr 45px 72px}}
+</style>
+
+<h2>OpenRouter, using the app's existing quota language</h2>
+<p class="subtitle">One monthly budget produces familiar day and month windows. The sample uses a $20/month budget and the live $0.11 spend.</p>
+
+<div class="tot-shell">
+  <div class="tot-panel">
+    <div class="tot-tabs"><div class="tot-tab active">Usage</div><div class="tot-tab">Settings</div><div class="refresh">↻</div></div>
+    <div class="summary">
+      <div class="ring"></div>
+      <div><b>On target everywhere</b><div class="muted">worst: OpenRouter day, 16% of budget</div></div>
+    </div>
+    <div class="provider">
+      <div class="or-mark">OR</div>
+      <div><span class="provider-name">OpenRouter</span> &nbsp;<span class="pill">$20 / MO</span></div>
+      <div class="today-cost">$0.11 today</div>
+    </div>
+    <div class="usage-row">
+      <div class="row-label"><strong>day</strong><small>$0.11 / $0.67</small></div>
+      <div class="track"><div class="fill" style="width:16%"></div><div class="target"></div></div>
+      <div class="pct">16%</div><div class="reset">02:00</div>
+    </div>
+    <div class="usage-row">
+      <div class="row-label"><strong>month</strong><small>$0.11 / $20</small></div>
+      <div class="track"><div class="fill" style="width:1%"></div><div class="target"></div></div>
+      <div class="pct">1%</div><div class="reset">Oct 1</div>
+    </div>
+    <div class="foot"><span>Updated 14:34 · every 15 min</span><span>Quit</span></div>
+  </div>
+
+  <div class="tot-panel settings">
+    <h3>OpenRouter</h3>
+    <div class="sub">Automatic when possible, with a secure fallback.</div>
+    <div class="setting"><div><b>Connection</b><small>OpenCode or a running Conductor agent</small></div><div class="status">● Connected</div></div>
+    <div class="setting"><div><b>API key</b><small>Stored in Keychain only when automatic detection is unavailable</small></div><div class="button">Add key…</div></div>
+    <div class="setting"><div><b>Monthly budget</b><small>Daily allowance is derived from days in the month</small></div><div class="value">$ 20.00</div></div>
+    <div class="setting"><div><b>Show OpenRouter</b><small>Uses the same menu bar, card and alert rules</small></div><div class="status">On</div></div>
+    <div class="choice" data-choice="existing-language" onclick="toggleSelect(this)">Use this direction</div>
+  </div>
+</div>

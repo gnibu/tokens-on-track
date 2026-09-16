@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "linear-tenjin-tech": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.14.2",
+        "https://mcp.linear.app/mcp",
+        "--auth-timeout",
+        "300"
+      ],
+      "env": {
+        "MCP_REMOTE_CONFIG_DIR": "/Users/ben/.mcp-auth/tenjin-tech"
+      }
+    }
+  }
+}
