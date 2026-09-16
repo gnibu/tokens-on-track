@@ -5,6 +5,13 @@ Notable changes, newest first. The format follows
 git tags and `CFBundleShortVersionString`. Each release is also published with
 generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/releases).
 
+## [Unreleased]
+
+### Changed
+
+- The default refresh interval is 10 minutes (was 15), and 10 is now a
+  selectable interval alongside 5, 15, 30 and 60.
+
 ## [1.1.0] - 2026-09-16
 
 ### Added

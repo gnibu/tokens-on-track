@@ -223,7 +223,7 @@ final class Preferences: ObservableObject {
             Keys.usageAlerts: true,
             Keys.paceThreshold: 1.5,
             Keys.paceAlerts: true,
-            Keys.refreshMinutes: 15.0,
+            Keys.refreshMinutes: 10.0,
             Keys.showOpenRouterCosts: false,
             Keys.hideSparkSession: true,
             Keys.hideSparkWeek: true,
