@@ -17,7 +17,8 @@ really encrypted, and writes a `.env`. It is re-runnable and skips whatever is
 already done.
 
 Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
-`Resources/Info.plist` first, since both are read from there:
+`Resources/Info.plist`, merge that change, and publish from the exact current
+`origin/main` commit, since both versions are read from the plist:
 
 ```sh
 ./release.py                # dist/TokensOnTrack-<version>.dmg
@@ -36,12 +37,16 @@ submission. The mtimes are not trusted alone: `stapler validate` has to agree,
 so a run that died between notarizing and stapling is correctly seen as
 unfinished rather than current.
 
-`--publish` tags the current commit `v<version>`, pushes the tag, and creates a
-GitHub release with the dmg attached and generated notes. Its preconditions —
+`--publish` fetches `origin/main`, requires `HEAD` to be that exact commit,
+tags it as `v<version>`, pushes the tag, and creates a GitHub release with the
+dmg attached and generated notes. Publishing from a pull-request branch is
+deliberately rejected even when it has been pushed: the repository uses
+squash merges, so a tag made before the merge would live on parallel history
+and GitHub would generate misleading release notes. The other preconditions —
 `gh` installed and authenticated, the version bumped to something not already
-tagged, a clean tree, and a commit that exists on a remote — are all checked
-before the build starts rather than after, so a stale version number costs a
-second instead of two compiles and two trips through Apple's notary queue.
+tagged, and a clean tree — are also checked before the build starts rather
+than after, so a stale version number costs a second instead of two compiles
+and two trips through Apple's notary queue.
 
 No arguments and no environment needed: the signing identity is auto-detected
 from the keychain, and the notary password never leaves it. `.env` (see

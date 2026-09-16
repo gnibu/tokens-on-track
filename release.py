@@ -25,9 +25,10 @@ everything they were built from. The compile is not what that saves — swift
 build is already incremental — it is the notary queue, which took over an hour
 on this team's first submission.
 
---publish is checked before the build, not after, so a missing gh login or a
-version that was never bumped fails in the first second rather than after two
-compiles and two round trips to Apple's notary queue.
+--publish is checked before the build, not after, so a missing gh login, a
+version that was never bumped, or a commit that has not landed on main fails
+in the first second rather than after two compiles and two round trips to
+Apple's notary queue.
 
 Bump CFBundleShortVersionString and CFBundleVersion in Resources/Info.plist
 before each release; both are read from there, so the plist stays the single
@@ -516,6 +517,22 @@ def git_out(args: Sequence[str]) -> str:
     return run(["git", *args]).strip()
 
 
+def require_main_commit(head: str, main: str) -> None:
+    """Refuse tags that GitHub cannot place in main's release history.
+
+    Merely being present on some remote branch is not enough: this repository
+    squash-merges pull requests, so tagging their head first leaves the tag on
+    a parallel history even when the resulting source tree is identical.
+    """
+    if head != main:
+        fail(
+            "HEAD is not the current origin/main commit.\n"
+            "Merge the release changes first, then publish from that exact commit.\n"
+            f"HEAD:        {head}\n"
+            f"origin/main: {main}"
+        )
+
+
 def publish_preflight(tag: str) -> None:
     """Checked before the build, not after.
 
@@ -539,14 +556,23 @@ def publish_preflight(tag: str) -> None:
     if git_out(["ls-remote", "--tags", "origin", tag]):
         fail(f"tag {tag} already exists on origin. Bump the version.")
 
-    # A published binary should be reproducible from a commit someone else can
-    # fetch. Dirty or unpushed means the tag would point at something that
-    # does not describe what was actually built.
+    # A published binary should be reproducible from the public main branch.
+    # In particular, a pushed PR head is not sufficient: squash-merging gives
+    # main a different commit, leaving a pre-merge tag on divergent history
+    # and making GitHub's generated release notes repeat or omit changes.
     if git_out(["status", "--porcelain"]):
         fail("working tree is dirty. Commit or stash before publishing.")
 
-    if not git_out(["branch", "-r", "--contains", "HEAD"]):
-        fail("HEAD is not on any remote branch. Push it before publishing.")
+    run(
+        [
+            "git", "fetch", "--quiet", "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ]
+    )
+    require_main_commit(
+        git_out(["rev-parse", "HEAD"]),
+        git_out(["rev-parse", "refs/remotes/origin/main"]),
+    )
 
 
 def publish(dmg: Path, tag: str, version: str) -> None:
@@ -707,9 +733,10 @@ def finish(bundle: Path, dmg: Path, version: str, publishing: bool) -> None:
 # Self-test
 #
 # The parts worth a check are the ones that read someone else's output —
-# Apple's JSON and the user's .env — plus the identity rule, where being wrong
-# means signing a public release with the wrong certificate. Everything else
-# is a subprocess call that fails loudly on its own.
+# Apple's JSON and the user's .env — plus the identity and release-commit
+# rules, where being wrong means signing or tagging a public release
+# incorrectly. Everything else is a subprocess call that fails loudly on its
+# own.
 # --------------------------------------------------------------------- #
 def self_test() -> int:
     submitted = SubmitResult.model_validate_json(
@@ -760,6 +787,15 @@ def self_test() -> int:
     os.environ.pop("NOTARY_PROFILE")
     assert setting("NOTARY_PROFILE", {}, "fallback") == "fallback"
     assert setting("MISSING", parsed, "fallback") == "fallback"
+
+    require_main_commit("same-commit", "same-commit")
+    try:
+        require_main_commit("feature-head", "squash-merge")
+    except Fail as exc:
+        assert "exact commit" in str(exc), exc
+        assert "feature-head" in str(exc) and "squash-merge" in str(exc), exc
+    else:
+        raise AssertionError("publishing away from origin/main should have failed")
 
     assert poll_interval(0) < poll_interval(600) < poll_interval(3000)
 
