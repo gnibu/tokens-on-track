@@ -226,7 +226,7 @@ final class Preferences: ObservableObject {
             Keys.refreshMinutes: 15.0,
             Keys.showOpenRouterCosts: false,
             Keys.hideSparkSession: true,
-            Keys.hideSparkWeek: false,
+            Keys.hideSparkWeek: true,
         ])
         showLogoInMenuBar = defaults.bool(forKey: Keys.showLogo)
         showGaugeInMenuBar = defaults.bool(forKey: Keys.showGauge)
