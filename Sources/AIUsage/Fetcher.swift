@@ -184,9 +184,17 @@ enum Fetcher {
             return provider
         }
 
+        // A response without the spend counters cannot be turned into a reading.
+        // Defaulting them to zero would draw a healthy 0% out of a malformed
+        // payload, so the absence is an error rather than a value.
+        guard let daily = (data["usage_daily"] as? NSNumber)?.doubleValue,
+              let monthly = (data["usage_monthly"] as? NSNumber)?.doubleValue
+        else {
+            provider.error = "no spend data"
+            return provider
+        }
+
         guard let budget = monthlyBudget, budget.isFinite, budget > 0 else {
-            let daily = (data["usage_daily"] as? NSNumber)?.doubleValue ?? 0
-            let monthly = (data["usage_monthly"] as? NSNumber)?.doubleValue ?? 0
             provider.windows = OpenRouterBudget.unbudgetedWindows(
                 dailySpend: daily,
                 monthlySpend: monthly
@@ -195,16 +203,13 @@ enum Fetcher {
             return provider
         }
 
-        let daily = (data["usage_daily"] as? NSNumber)?.doubleValue ?? 0
-        let monthly = (data["usage_monthly"] as? NSNumber)?.doubleValue ?? 0
         provider.plan = OpenRouterBudget.plan(budget)
         provider.windows = OpenRouterBudget.windows(
             dailySpend: daily,
             monthlySpend: monthly,
             monthlyBudget: budget
         )
-        provider.ok = provider.windows.count == 2
-        if !provider.ok { provider.error = "no spend data" }
+        provider.ok = true
         return provider
     }
 
@@ -233,18 +238,13 @@ enum Fetcher {
     /// this same-user process lookup is intentionally a last, transient resort.
     private static func conductorOpenRouterKeys() -> [String] {
         guard let raw = runProcess(
-            executableURL: URL(fileURLWithPath: "/usr/bin/pgrep"),
-            arguments: [
-                "-f",
-                "com\\.conductor\\.app/agent-binaries/acp-providers/opencode/.*/opencode acp",
-            ],
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
             timeout: 5
         ), let list = String(data: raw, encoding: .utf8)
         else { return [] }
 
-        let pids = list.split(whereSeparator: \Character.isWhitespace).compactMap { Int32($0) }
-        return pids.compactMap { pid in
-            defer { /* Process output falls out of scope immediately. */ }
+        return OpenRouterCredential.conductorPIDs(in: list).compactMap { pid in
             guard let raw = runProcess(
                 executableURL: URL(fileURLWithPath: "/bin/ps"),
                 arguments: ["eww", "-p", String(pid), "-o", "command="],

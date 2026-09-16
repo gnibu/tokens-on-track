@@ -90,8 +90,8 @@ private struct SettingsTab: View {
     @State private var openRouterKeyError: String?
     @State private var openRouterBudgetError: String?
     @State private var openRouterBudgetText = Preferences.shared.openRouterMonthlyBudget
-        .map { OpenRouterBudget.dollars($0).dropFirst() }
-        .map(String.init) ?? ""
+        .map(SettingsTab.editableBudget)
+        ?? ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -285,7 +285,13 @@ private struct SettingsTab: View {
                         HStack(spacing: 10) {
                             if store.hasSavedOpenRouterKey {
                                 GlassLink(title: "Remove") {
-                                    Task { await store.removeOpenRouterKey() }
+                                    Task {
+                                        if await store.removeOpenRouterKey() {
+                                            openRouterKeyError = nil
+                                        } else {
+                                            openRouterKeyError = "Could not remove the key from Keychain"
+                                        }
+                                    }
                                 }
                             }
                             GlassButton(label: store.hasSavedOpenRouterKey ? "Replace…" : "Add key…") {
@@ -378,6 +384,14 @@ private struct SettingsTab: View {
                 openRouterKeyError = "Could not save the key in Keychain"
             }
         }
+    }
+
+    /// The field is an input, not a readout: seed it with the value exactly as
+    /// stored so the next keystroke cannot persist a display-rounded budget.
+    private static func editableBudget(_ value: Double) -> String {
+        var text = String(value)
+        if text.hasSuffix(".0") { text.removeLast(2) }
+        return text
     }
 
     private func setOpenRouterBudget(_ text: String) {

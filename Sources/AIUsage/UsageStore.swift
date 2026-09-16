@@ -161,10 +161,12 @@ final class UsageStore: ObservableObject {
         return saved
     }
 
-    func removeOpenRouterKey() async {
-        _ = OpenRouterKeychain.remove()
-        hasSavedOpenRouterKey = false
-        await refresh()
+    @discardableResult
+    func removeOpenRouterKey() async -> Bool {
+        let removed = OpenRouterKeychain.remove()
+        hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+        if removed { await refresh() }
+        return removed
     }
 
     // ----------------------------------------------------------------- //

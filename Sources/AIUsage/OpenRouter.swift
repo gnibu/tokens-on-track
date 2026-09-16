@@ -41,10 +41,22 @@ enum OpenRouterBudget {
         "\(dollars(monthlyBudget))/mo"
     }
 
-    /// Cost labels are scanning aids, not an invoice: round them to one decimal and
-    /// trim redundant zeroes so small rows stay quiet.
+    /// Cost labels are scanning aids, not an invoice. Whole dollars drop the
+    /// decimals, anything else keeps at most two — and a small spend is given
+    /// just enough digits to stay visible rather than rounding to `$0`.
     static func dollars(_ value: Double) -> String {
-        var number = String(format: "%.1f", value)
+        guard value.isFinite else { return "$0" }
+        let magnitude = abs(value)
+        let decimals: Int
+        if magnitude == magnitude.rounded() {
+            decimals = 0
+        } else if magnitude >= 0.01 {
+            decimals = 2
+        } else {
+            decimals = min(6, max(2, Int(ceil(-log10(magnitude))) + 1))
+        }
+
+        var number = String(format: "%.\(decimals)f", value)
         while number.contains("."), number.last == "0" { number.removeLast() }
         if number.last == "." { number.removeLast() }
         return "$\(number)"

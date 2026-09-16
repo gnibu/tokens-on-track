@@ -176,7 +176,8 @@ Which windows appear depends on what each API returns for your plan:
 - OpenRouter reports dollar spend. Enter one monthly budget in Settings; the
   app divides it by the number of UTC days in the current month for the daily
   row, while the monthly row uses the full amount. A disabled-by-default setting
-  can show rounded spend and allowance beneath each percentage. Until a budget
+  can show the spend and allowance beneath each percentage, keeping cents — and
+  sub-cent spend — visible rather than rounding them away. Until a budget
   is defined, the app shows one setup notice instead of an empty provider block.
 
 ## Security

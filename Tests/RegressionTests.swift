@@ -201,8 +201,12 @@ enum RegressionTests {
           123 /usr/bin/something
           456 /Users/me/Library/Application Support/com.conductor.app/agent-binaries/acp-providers/opencode/1.18.29/darwin-arm64/opencode acp
           789 /opt/homebrew/bin/opencode
+          321 /Users/me/Library/Application Support/com.conductor.app/agent-binaries/acp-providers/opencode/1.18.29/darwin-arm64/opencode acp --extra
         """
-        check(OpenRouterCredential.conductorPIDs(in: processList) == [456], "only Conductor's OpenCode ACP process qualifies")
+        check(
+            OpenRouterCredential.conductorPIDs(in: processList) == [456],
+            "only Conductor's exact OpenCode ACP process qualifies"
+        )
 
         let environment = "PATH=/usr/bin HOME=/Users/me OPENROUTER_API_KEY=sk-or-test-conductor OTHER_SECRET=ignore"
         check(
@@ -217,8 +221,11 @@ enum RegressionTests {
 
     private static func testOpenRouterDollarFormatting() {
         check(OpenRouterBudget.dollars(20) == "$20", "whole budgets should omit cents")
-        check(OpenRouterBudget.dollars(0.105751342) == "$0.1", "spend should round to one decimal")
-        check(OpenRouterBudget.dollars(12.34) == "$12.3", "larger values should use the same precision")
+        check(OpenRouterBudget.dollars(20.75) == "$20.75", "a non-whole budget must keep its cents")
+        check(OpenRouterBudget.dollars(0.105751342) == "$0.11", "spend should round to cents")
+        check(OpenRouterBudget.dollars(0.04) == "$0.04", "sub-five-cent spend must not round to zero")
+        check(OpenRouterBudget.dollars(0.004) == "$0.004", "small spend must stay visible")
+        check(OpenRouterBudget.dollars(12.34) == "$12.34", "larger values should use the same precision")
 
         let costWindow = UsageWindow(
             label: "day", percent: 15, resetsAt: nil, windowSeconds: nil,
