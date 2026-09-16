@@ -191,8 +191,8 @@ Worth understanding before running something that touches your API credentials.
   environment as a best-effort fallback; it never copies that key into storage.
 - Sends each token *only* to its own provider's host. No third party, no
   telemetry, no analytics.
-- Never prints or logs a token. The cache holds percentages, reset timestamps
-  and plan names — nothing secret.
+- Never prints or logs a token. The cache holds usage values, OpenRouter spend
+  totals and budgets, reset timestamps and plan names — nothing secret.
 - Read-only on provider-owned credential stores. It never writes or refreshes
   their tokens. Only a key explicitly entered in Settings is written, and only
   to the app's own Keychain item.

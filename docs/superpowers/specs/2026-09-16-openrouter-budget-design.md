@@ -14,7 +14,7 @@ The first version uses an ordinary OpenRouter inference key. It does not require
 
 Once connected and given a monthly budget, OpenRouter appears as an ordinary provider block on the dropdown and desktop card:
 
-- The provider heading uses the official OpenRouter glyph and a plan badge such as `$20 / MO`.
+- The provider heading uses OpenRouter's original routing glyph and a plan badge such as `$20 / MO`.
 - The `day` row shows today's OpenRouter spend against a daily allowance derived from the monthly budget.
 - The `month` row shows month-to-date spend against the monthly budget.
 - Both rows use the existing filled track, target notch, usage percentage, pace colour, reset label, worst-row marker, menu bar gauge, ranking, and alerts.
@@ -116,13 +116,13 @@ The current OpenRouter credential source is non-secret, in-memory UI state. It i
 
 ## Official OpenRouter mark
 
-Vendor the current official glyph from:
+Vendor the compact original routing glyph preserved by Simple Icons:
 
-`https://openrouter.ai/brand/v2/openrouter-glyph-light.svg`
+`https://cdn.simpleicons.org/openrouter`
 
 as `Resources/Icons/openrouter.svg`. The file remains an auditable local build input after vendoring; runtime rendering does not depend on the network.
 
-The official asset has a non-24-square view box. Extend the glyph loader to respect an SVG's `viewBox` and fit it uniformly into the requested square without stretching or rotating it. Existing 24×24 Claude and OpenAI assets retain their current geometry. Add `openrouter` to the provider-to-file map.
+Extend the glyph loader to respect each SVG's `viewBox`, support the smooth and quadratic path commands used by provider assets, and fit marks uniformly without stretching or rotating them. Existing 24×24 Claude and OpenAI assets retain their current geometry. Add `openrouter` to the provider-to-file map.
 
 All three surfaces render the mark monochrome using the existing label/ink colour. Pace colour stays on the adjacent track or ring and never tints the trademark.
 
@@ -187,4 +187,4 @@ Update the README to include OpenRouter in the supported providers, explain the 
 - OpenRouter current-key API: https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key
 - OpenCode provider credentials: https://opencode.ai/docs/providers
 - Official OpenRouter brand refresh: https://openrouter.ai/blog/announcements/brand-refresh/
-- Official current glyph: https://openrouter.ai/brand/v2/openrouter-glyph-light.svg
+- Original routing glyph: https://cdn.simpleicons.org/openrouter

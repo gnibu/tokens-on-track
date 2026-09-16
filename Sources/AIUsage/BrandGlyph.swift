@@ -11,8 +11,8 @@ import AppKit
 /// colour lives on the ring beside the mark, which is nobody's trademark.
 enum BrandGlyph {
     /// The width needed to draw a mark at the requested height without making
-    /// a naturally wide logo look pinched. Most providers are square; the
-    /// a provider asset can still request a wider slot without being pinched.
+    /// a naturally wide logo look pinched. Most providers are square; a
+    /// provider asset can still request a wider slot without being pinched.
     static func width(for provider: String, height: CGFloat) -> CGFloat {
         guard let file = files[provider.lowercased()],
               let viewBox = cache.glyph(for: file)?.viewBox,
