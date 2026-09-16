@@ -5,7 +5,7 @@
 Tokens on Track is a macOS menu bar app showing how much of your **Claude Code**
 and **Codex** quota you have burned, plus **OpenRouter** spend against a budget
 you choose. It shows whether you are spending faster than the window refills,
-refreshes every 15 minutes, and tells you when you are running hot.
+refreshes every 10 minutes by default, and tells you when you are running hot.
 
 <img src="docs/screenshots/menubar.png" width="163" alt="The menu bar item: a Claude mark with a green ring at 70% marked w, and a second at 53% marked h.">
 

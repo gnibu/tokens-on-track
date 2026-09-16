@@ -563,7 +563,7 @@ private struct SettingsTab: View {
                     .foregroundStyle(Glass.ink(0.92))
 
                 GlassSegmented(
-                    options: [.init(5.0, "5"), .init(15.0, "15"), .init(30.0, "30"), .init(60.0, "60 min")],
+                    options: [.init(5.0, "5"), .init(10.0, "10"), .init(15.0, "15"), .init(30.0, "30"), .init(60.0, "60 min")],
                     selection: $preferences.refreshMinutes
                 )
             }
