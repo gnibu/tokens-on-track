@@ -17,3 +17,6 @@ dist/
 # byte-compiled release.py, from importing it for diagnostics
 __pycache__/
 *.pyc
+
+# MCP server config, copied in per-workspace by Conductor
+.mcp.json
