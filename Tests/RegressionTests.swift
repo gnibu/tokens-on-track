@@ -251,14 +251,24 @@ enum RegressionTests {
         let claude = provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])
         let report = Report(providers: [claude, codex], date: now)
 
-        check(report.hasSparkWindows, "a spark bucket must be detectable for the settings switch")
+        check(
+            report.hasSparkSession && report.hasSparkWeekly,
+            "each spark bucket must be detectable for its own settings switch"
+        )
 
-        let hidClaude = report.displayProviders(hiding: ["Claude"], hideSpark: false)
+        let hidClaude = report.displayProviders(hiding: ["Claude"], hidingSpark: .none)
         check(hidClaude.map(\.name) == ["Codex"], "a hidden provider must be dropped")
 
-        let noSpark = report.displayProviders(hideSpark: true)
+        let noSession = report.displayProviders(hidingSpark: HiddenSpark(session: true))
+        let sessionRows = noSession.first { $0.name == "Codex" }?.windows.map(\.label)
+        check(
+            sessionRows == ["10.0", "spark week"],
+            "hiding the session row must keep the weekly spark row"
+        )
+
+        let noSpark = report.displayProviders(hidingSpark: HiddenSpark(session: true, weekly: true))
         let codexRows = noSpark.first { $0.name == "Codex" }?.windows.map(\.label)
-        check(codexRows == ["10.0"], "spark rows must be dropped, the main window kept")
+        check(codexRows == ["10.0"], "both spark rows must be droppable, the main window kept")
     }
 
     private static func testRecentlyActiveProviderStaysVisibleWhenUnreadable() {

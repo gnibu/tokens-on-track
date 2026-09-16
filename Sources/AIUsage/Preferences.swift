@@ -131,9 +131,20 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(hiddenProviders), forKey: Keys.hiddenProviders) }
     }
 
-    /// Drop Codex's per-model "spark" quota rows, which some users never touch.
-    @Published var hideCodexSpark: Bool {
-        didSet { defaults.set(hideCodexSpark, forKey: Keys.hideCodexSpark) }
+    /// Keep Codex's per-model "spark" buckets off screen. There are two — a short
+    /// session row and a weekly one — and they are toggled separately because
+    /// plenty of users want one and not the other.
+    @Published var hideSparkSession: Bool {
+        didSet { defaults.set(hideSparkSession, forKey: Keys.hideSparkSession) }
+    }
+
+    @Published var hideSparkWeek: Bool {
+        didSet { defaults.set(hideSparkWeek, forKey: Keys.hideSparkWeek) }
+    }
+
+    /// What the reading surfaces consult when filtering spark rows.
+    var hiddenSpark: HiddenSpark {
+        HiddenSpark(session: hideSparkSession, weekly: hideSparkWeek)
     }
 
     func setProvider(_ name: String, hidden: Bool) {
@@ -161,7 +172,11 @@ final class Preferences: ObservableObject {
         static let paceAlerts = "paceAlertsEnabled"
         static let refreshMinutes = "refreshMinutes"
         static let hiddenProviders = "hiddenProviders"
-        static let hideCodexSpark = "hideCodexSpark"
+        static let hideSparkSession = "hideSparkSession"
+        static let hideSparkWeek = "hideSparkWeek"
+        /// The single spark switch this replaced. Read once to migrate, then
+        /// cleared so turning one row back on is not undone at next launch.
+        static let legacyHideCodexSpark = "hideCodexSpark"
     }
 
     private init() {
@@ -189,7 +204,8 @@ final class Preferences: ObservableObject {
             Keys.paceThreshold: 1.5,
             Keys.paceAlerts: true,
             Keys.refreshMinutes: 15.0,
-            Keys.hideCodexSpark: false,
+            Keys.hideSparkSession: true,
+            Keys.hideSparkWeek: false,
         ])
         showLogoInMenuBar = defaults.bool(forKey: Keys.showLogo)
         showGaugeInMenuBar = defaults.bool(forKey: Keys.showGauge)
@@ -216,7 +232,18 @@ final class Preferences: ObservableObject {
         paceAlertsEnabled = defaults.bool(forKey: Keys.paceAlerts)
         refreshMinutes = defaults.double(forKey: Keys.refreshMinutes)
         hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
-        hideCodexSpark = defaults.bool(forKey: Keys.hideCodexSpark)
+
+        // Anyone who had the old all-or-nothing spark switch on expects every
+        // spark row still hidden, so seed both halves from it once.
+        if defaults.object(forKey: Keys.legacyHideCodexSpark) != nil {
+            if defaults.bool(forKey: Keys.legacyHideCodexSpark) {
+                defaults.set(true, forKey: Keys.hideSparkSession)
+                defaults.set(true, forKey: Keys.hideSparkWeek)
+            }
+            defaults.removeObject(forKey: Keys.legacyHideCodexSpark)
+        }
+        hideSparkSession = defaults.bool(forKey: Keys.hideSparkSession)
+        hideSparkWeek = defaults.bool(forKey: Keys.hideSparkWeek)
     }
 
     /// The last selected weekday cannot be removed: an enabled empty schedule

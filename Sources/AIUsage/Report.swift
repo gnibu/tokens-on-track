@@ -11,6 +11,14 @@ struct UsageWindow: Codable, Identifiable, Equatable {
 
     var id: String { label }
 
+    /// True for a per-model "spark" bucket, which Codex bills apart from its
+    /// main quota and some users never touch.
+    var isSpark: Bool { label.lowercased().hasPrefix("spark") }
+
+    /// Spark arrives as a short session row and a longer weekly one. Anything a
+    /// week or longer counts as the weekly row, matching how the fetcher labels.
+    var isSparkWeek: Bool { (windowSeconds ?? 0) >= 7 * 86_400 }
+
     enum CodingKeys: String, CodingKey {
         case label
         case percent
@@ -31,6 +39,23 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         percent = (try? box.decode(Double.self, forKey: .percent)) ?? 0
         resetsAt = try? box.decodeIfPresent(Int.self, forKey: .resetsAt)
         windowSeconds = try? box.decodeIfPresent(Int.self, forKey: .windowSeconds)
+    }
+}
+
+/// Which of Codex's per-model "spark" buckets the user has chosen to keep off
+/// every surface. Spark reports a short session row and a weekly one; they are
+/// toggled separately because plenty of people want one and not the other.
+struct HiddenSpark: Equatable {
+    var session = false
+    var weekly = false
+
+    static let none = HiddenSpark()
+
+    var isEmpty: Bool { !session && !weekly }
+
+    /// True when this spark bucket should be dropped.
+    func hides(_ window: UsageWindow) -> Bool {
+        window.isSparkWeek ? weekly : session
     }
 }
 
@@ -175,15 +200,20 @@ struct Report: Codable, Equatable {
     }
 
     /// What the reading surfaces actually draw: set-up providers, minus any the
-    /// user has hidden, with the Codex "spark" model buckets dropped on request.
+    /// user has hidden, with any unwanted Codex "spark" model buckets dropped.
     /// One filter for the card, the dropdown, the menu bar and the alerts, so a
     /// hidden provider is hidden everywhere at once.
-    func displayProviders(hiding hiddenNames: Set<String> = [], hideSpark: Bool = false) -> [Provider] {
+    func displayProviders(
+        hiding hiddenNames: Set<String> = [],
+        hidingSpark hiddenSpark: HiddenSpark = .none
+    ) -> [Provider] {
         visibleProviders.compactMap { provider in
             guard !hiddenNames.contains(provider.name) else { return nil }
-            guard hideSpark else { return provider }
+            guard !hiddenSpark.isEmpty else { return provider }
             var trimmed = provider
-            trimmed.windows = provider.windows.filter { !$0.label.lowercased().hasPrefix("spark") }
+            trimmed.windows = provider.windows.filter {
+                !($0.isSpark && hiddenSpark.hides($0))
+            }
             return trimmed
         }
     }
@@ -192,16 +222,24 @@ struct Report: Codable, Equatable {
     /// spark rows already removed. Everything that ranks or summarises windows —
     /// the header verdict, the card's hot glow, the menu bar — runs off this, so
     /// none of them can speak for a row that is not drawn.
-    func displaying(hiding hiddenNames: Set<String> = [], hideSpark: Bool = false) -> Report {
+    func displaying(
+        hiding hiddenNames: Set<String> = [],
+        hidingSpark hiddenSpark: HiddenSpark = .none
+    ) -> Report {
         var copy = self
-        copy.providers = displayProviders(hiding: hiddenNames, hideSpark: hideSpark)
+        copy.providers = displayProviders(hiding: hiddenNames, hidingSpark: hiddenSpark)
         return copy
     }
 
-    /// True when any provider reports a "spark" bucket, so the settings pane can
-    /// offer to hide them only when there is something to hide.
-    var hasSparkWindows: Bool {
-        providers.contains { $0.windows.contains { $0.label.lowercased().hasPrefix("spark") } }
+    /// True when any provider reports a short spark bucket, so the settings pane
+    /// can offer to hide it only when there is one to hide.
+    var hasSparkSession: Bool {
+        providers.contains { $0.windows.contains { $0.isSpark && !$0.isSparkWeek } }
+    }
+
+    /// True when any provider reports a weekly spark bucket.
+    var hasSparkWeekly: Bool {
+        providers.contains { $0.windows.contains { $0.isSpark && $0.isSparkWeek } }
     }
 
     /// A reading older than this is shown as stale rather than silently trusted.
