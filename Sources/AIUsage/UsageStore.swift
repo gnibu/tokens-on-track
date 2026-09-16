@@ -13,6 +13,7 @@ final class UsageStore: ObservableObject {
 
     @Published private(set) var report: Report?
     @Published private(set) var isRefreshing = false
+    @Published private(set) var hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
     @Published private(set) var statusImage: NSImage = StatusIcon.image(segments: [])
     /// Spells out both readings for whatever the item is drawn as, since the
     /// icon has room for one number and no room at all to label it.
@@ -37,11 +38,20 @@ final class UsageStore: ObservableObject {
         let preferences = Preferences.shared
         workSchedule = preferences.workSchedule
         loadCache()
+        report = report?.rebudgetingOpenRouter(
+            monthlyBudget: preferences.openRouterMonthlyBudget
+        )
         redrawIcon()
 
         preferences.$refreshMinutes
             .removeDuplicates()
             .sink { [weak self] minutes in self?.scheduleTimer(minutes: minutes) }
+            .store(in: &preferenceWatches)
+
+        preferences.$openRouterMonthlyBudget
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] budget in self?.openRouterBudgetChanged(budget) }
             .store(in: &preferenceWatches)
 
         Publishers.CombineLatest4(
@@ -128,7 +138,9 @@ final class UsageStore: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
 
-        let merged = (await Fetcher.fetchAll()).carryingOver(from: report)
+        let merged = (await Fetcher.fetchAll(
+            openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget
+        )).carryingOver(from: report)
         report = merged
         write(merged)
         redrawIcon()
@@ -139,6 +151,20 @@ final class UsageStore: ObservableObject {
         let age = Date().timeIntervalSince1970 - Double(report?.updatedAt ?? 0)
         guard age > seconds else { return }
         Task { await refresh() }
+    }
+
+    @discardableResult
+    func saveOpenRouterKey(_ key: String) async -> Bool {
+        let saved = OpenRouterKeychain.save(key)
+        hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+        if saved { await refresh() }
+        return saved
+    }
+
+    func removeOpenRouterKey() async {
+        _ = OpenRouterKeychain.remove()
+        hasSavedOpenRouterKey = false
+        await refresh()
     }
 
     // ----------------------------------------------------------------- //
@@ -180,6 +206,7 @@ final class UsageStore: ObservableObject {
                 source: "\($0.provider.name) \($0.window.label)",
                 window: $0.window,
                 explains: false,
+                showsCost: preferences.showOpenRouterCosts,
                 timing: timing
             )
         }
@@ -208,6 +235,14 @@ final class UsageStore: ObservableObject {
         workSchedule = schedule
         redrawIcon()
         scheduleNextBoundary()
+    }
+
+    private func openRouterBudgetChanged(_ budget: Double?) {
+        guard let current = report else { return }
+        let updated = current.rebudgetingOpenRouter(monthlyBudget: budget)
+        report = updated
+        write(updated)
+        redrawIcon()
     }
 
     private func clockContextChanged() {

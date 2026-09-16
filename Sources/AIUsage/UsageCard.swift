@@ -49,6 +49,7 @@ struct DesktopUsageCard: View {
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
+        let blocks = shown.filter { !$0.needsOpenRouterBudget }
 
         VStack(alignment: .leading, spacing: 18) {
             header(verdict)
@@ -57,17 +58,18 @@ struct DesktopUsageCard: View {
 
             Glass.hairline
 
-            if !shown.isEmpty {
-                ForEach(shown) { provider in
+            if !blocks.isEmpty {
+                ForEach(blocks) { provider in
                     ProviderBlock(
                         provider: provider,
                         metrics: .card,
                         mode: preferences.percentMode,
                         timing: timing,
+                        showsCost: preferences.showOpenRouterCosts,
                         worstRow: verdict.rowKey
                     )
                 }
-            } else {
+            } else if shown.isEmpty {
                 Text(store.isRefreshing ? "fetching…" : "no data yet")
                     .font(.system(size: 13))
                     .foregroundStyle(Glass.ink(0.5))
@@ -127,26 +129,28 @@ struct MenuUsageView: View {
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
+        let blocks = shown.filter { !$0.needsOpenRouterBudget }
 
         VStack(alignment: .leading, spacing: 16) {
             summary(verdict)
 
             OutageNotice(providers: shown, size: 11)
 
-            if !shown.isEmpty {
+            if !blocks.isEmpty {
                 VStack(alignment: .leading, spacing: 11) {
-                    ForEach(shown) { provider in
+                    ForEach(blocks) { provider in
                         ProviderBlock(
                             provider: provider,
                             metrics: .menu,
                             mode: preferences.percentMode,
                             timing: timing,
                             showsNote: false,
+                            showsCost: preferences.showOpenRouterCosts,
                             worstRow: verdict.rowKey
                         )
                     }
                 }
-            } else {
+            } else if shown.isEmpty {
                 Text(store.isRefreshing ? "fetching…" : "no data yet")
                     .font(.system(size: 12))
                     .foregroundStyle(Glass.ink(0.5))
@@ -242,6 +246,7 @@ struct ProviderBlock: View {
     var mode: Pace.PercentMode = .budget
     var timing = Pace.Timing()
     var showsNote: Bool = true
+    var showsCost: Bool = false
     /// The row the summary above is speaking for, marked here so the reader can
     /// trace the ring back to the window it came from.
     var worstRow: String? = nil
@@ -286,6 +291,7 @@ struct ProviderBlock: View {
                             metrics: metrics,
                             mode: mode,
                             timing: timing,
+                            showsCost: showsCost,
                             isWorst: worstRow == Report.rowKey(provider: provider, window: window)
                         )
                     }
@@ -329,10 +335,12 @@ struct BrandMark: View {
     var opacity: Double = 0.9
 
     var body: some View {
+        let width = BrandGlyph.width(for: provider, height: size)
+
         Group {
             if let outline = BrandGlyph.path(
                 for: provider,
-                fitting: NSSize(width: size, height: size),
+                fitting: NSSize(width: width, height: size),
                 flipped: false
             ) {
                 // Even-odd, as the outline was parsed: the marks carry counters
@@ -345,7 +353,7 @@ struct BrandMark: View {
             }
         }
         .foregroundStyle(Glass.ink(opacity))
-        .frame(width: size, height: size)
+        .frame(width: width, height: size)
     }
 }
 
@@ -354,22 +362,34 @@ struct UsageRow: View {
     let metrics: RowMetrics
     var mode: Pace.PercentMode = .budget
     var timing = Pace.Timing()
+    var showsCost: Bool = false
     var isWorst: Bool = false
 
     var body: some View {
         let reading = Pace.reading(window, mode: mode, timing: timing)
+        let cost = showsCost ? OpenRouterBudget.detail(for: window) : nil
 
         HStack(spacing: metrics.gap) {
             // The dot sits in a gutter every row pays for, so marking a row
             // moves nothing.
-            HStack(spacing: 5) {
+            HStack(alignment: .top, spacing: 5) {
                 Circle()
                     .fill(isWorst ? Pace.color(window, timing: timing) : .clear)
                     .frame(width: 4, height: 4)
+                    .padding(.top, cost == nil ? 6 : 5)
 
-                Text(window.label)
-                    .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
-                    .foregroundStyle(Glass.ink(isWorst ? 0.95 : 0.6))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(window.label)
+                        .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
+                        .foregroundStyle(Glass.ink(isWorst ? 0.95 : 0.6))
+                    if let cost {
+                        Text(cost)
+                            .font(.system(size: max(8, metrics.labelSize - 4)))
+                            .monospacedDigit()
+                            .foregroundStyle(Glass.ink(0.4))
+                            .lineLimit(1)
+                    }
+                }
             }
             .frame(width: metrics.label, alignment: .leading)
 

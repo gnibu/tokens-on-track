@@ -111,7 +111,7 @@ enum StatusIcon {
     private static func width(of segment: Segment, parts: Parts) -> CGFloat {
         var widths: [CGFloat] = []
         if parts.contains(.mark), !segment.provider.isEmpty {
-            widths.append(mark)
+            widths.append(markWidth(for: segment.provider))
         }
         if parts.contains(.gauge) {
             widths.append(ring)
@@ -133,7 +133,7 @@ enum StatusIcon {
         if parts.contains(.mark), !segment.provider.isEmpty {
             space()
             drawMark(segment.provider, atX: x)
-            x += mark
+            x += markWidth(for: segment.provider)
         }
 
         if parts.contains(.gauge) {
@@ -156,7 +156,8 @@ enum StatusIcon {
     /// Monochrome and to scale — see the trademark note on `BrandGlyph`. A
     /// provider with no mark on file falls back to its initial.
     private static func drawMark(_ provider: String, atX x: CGFloat) {
-        let box = NSSize(width: mark, height: mark)
+        let width = markWidth(for: provider)
+        let box = NSSize(width: width, height: mark)
         NSColor.labelColor.setFill()
 
         if let path = BrandGlyph.path(for: provider, fitting: box) {
@@ -168,9 +169,13 @@ enum StatusIcon {
         let initial = String(provider.prefix(1)).uppercased() as NSString
         let size = initial.size(withAttributes: monogramAttributes)
         initial.draw(
-            at: NSPoint(x: x + (mark - size.width) / 2, y: (height - size.height) / 2),
+            at: NSPoint(x: x + (width - size.width) / 2, y: (height - size.height) / 2),
             withAttributes: monogramAttributes
         )
+    }
+
+    private static func markWidth(for provider: String) -> CGFloat {
+        BrandGlyph.width(for: provider, height: mark)
     }
 
     /// One letter in the hole of the ring, which is the only space a menu bar

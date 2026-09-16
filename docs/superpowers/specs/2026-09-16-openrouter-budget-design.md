@@ -33,7 +33,7 @@ Settings gains an **OpenRouter** group that remains available even before the pr
 - A monthly budget field denominated explicitly in USD.
 - The existing provider visibility control once OpenRouter has connected successfully.
 
-The monthly budget begins unset. It accepts any finite positive USD value. If a credential works but the budget is unset or invalid, the provider reports `set a monthly budget in Settings` and does not draw a fabricated zero gauge.
+The monthly budget begins unset. It accepts any finite positive USD value. If a credential works but the budget is unset or invalid, the provider reports `please define a budget in Settings` and does not draw a fabricated zero gauge.
 
 Changing the budget immediately recomputes cached OpenRouter window percentages from cached spend amounts. It does not depend on another network request succeeding.
 
@@ -104,7 +104,7 @@ OpenRouter-specific HTTP messages are:
 - 429: `rate limited — the reading will catch up`
 - 5xx: the existing service-unavailable wording
 - no credential: `not connected`
-- valid credential but no budget: `set a monthly budget in Settings`
+- valid credential but no budget: `please define a budget in Settings`
 
 ### Preferences and recalculation
 

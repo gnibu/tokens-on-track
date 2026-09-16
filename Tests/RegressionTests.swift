@@ -12,6 +12,13 @@ enum RegressionTests {
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()
         testProcessIsTerminatedAtTimeout()
+        testOpenRouterBuildsBudgetWindows()
+        testOpenRouterUsesLeapMonth()
+        testOpenRouterWindowMetadataRoundTrips()
+        testOpenRouterRebudgetsCachedSpend()
+        testOpenCodeOpenRouterCredentialIsParsed()
+        testConductorCredentialEnvironmentIsParsed()
+        testOpenRouterDollarFormatting()
         testBusiestWindowsIgnoreWhoOwnsThem()
         testFairShareGivesEveryProviderASlot()
         testFairShareSpendsSpareSlotsOnTheNextWorstWindow()
@@ -91,6 +98,143 @@ enum RegressionTests {
     }
 
     // ----------------------------------------------------------------- //
+    // OpenRouter spend becomes ordinary quota windows.
+    // ----------------------------------------------------------------- //
+
+    private static func testOpenRouterBuildsBudgetWindows() {
+        let calendar = utcCalendar()
+        let instant = date(2026, 9, 16, 12, 0, calendar: calendar)
+        let windows = OpenRouterBudget.windows(
+            dailySpend: 0.105751342,
+            monthlySpend: 0.105751342,
+            monthlyBudget: 20,
+            now: instant
+        )
+
+        check(windows.map(\.label) == ["day", "month"], "OpenRouter must expose day and month")
+        check(close(windows[0].budgetUSD, 20.0 / 30.0), "September daily allowance must be 1/30 of budget")
+        check(close(windows[0].spentUSD, 0.105751342), "daily spend must stay exact")
+        check(close(windows[0].percent, 0.105751342 / (20.0 / 30.0) * 100), "daily percent must use the derived allowance")
+        check(close(windows[1].percent, 0.105751342 / 20 * 100), "monthly percent must use the monthly budget")
+        check(
+            windows[0].resetsAt == Int(date(2026, 9, 17, 0, 0, calendar: calendar).timeIntervalSince1970),
+            "the day must reset at the next UTC midnight"
+        )
+        check(windows[0].windowSeconds == 86_400, "a UTC day must be 86400 seconds")
+        check(
+            windows[1].resetsAt == Int(date(2026, 10, 1, 0, 0, calendar: calendar).timeIntervalSince1970),
+            "the month must reset at the next UTC month"
+        )
+        check(windows[1].windowSeconds == 30 * 86_400, "September must be a 30-day window")
+    }
+
+    private static func testOpenRouterUsesLeapMonth() {
+        let calendar = utcCalendar()
+        let instant = date(2028, 2, 10, 12, 0, calendar: calendar)
+        let windows = OpenRouterBudget.windows(
+            dailySpend: 1,
+            monthlySpend: 5,
+            monthlyBudget: 29,
+            now: instant
+        )
+        check(close(windows[0].budgetUSD, 1), "a leap-February daily allowance must use 29 days")
+        check(windows[1].windowSeconds == 29 * 86_400, "February 2028 must contain 29 UTC days")
+    }
+
+    private static func testOpenRouterWindowMetadataRoundTrips() {
+        let original = UsageWindow(
+            label: "day",
+            percent: 25,
+            resetsAt: 123,
+            windowSeconds: 86_400,
+            spentUSD: 0.25,
+            budgetUSD: 1
+        )
+        guard let encoded = try? JSONEncoder().encode(original),
+              let restored = try? JSONDecoder().decode(UsageWindow.self, from: encoded)
+        else {
+            check(false, "an OpenRouter window must encode and decode")
+            return
+        }
+        check(restored == original, "USD metadata must survive the usage cache")
+
+        let old = Data(#"{"label":"week","percent":42}"#.utf8)
+        let legacy = try? JSONDecoder().decode(UsageWindow.self, from: old)
+        check(legacy?.spentUSD == nil && legacy?.budgetUSD == nil, "old caches must decode without USD metadata")
+    }
+
+    private static func testOpenRouterRebudgetsCachedSpend() {
+        let calendar = utcCalendar()
+        let instant = date(2026, 9, 16, 12, 0, calendar: calendar)
+        var openRouter = Provider(name: "OpenRouter")
+        openRouter.loggedIn = true
+        openRouter.credentialSource = .openCode
+        openRouter.error = OpenRouterBudget.missingBudgetMessage
+        openRouter.windows = OpenRouterBudget.unbudgetedWindows(
+            dailySpend: 0.20,
+            monthlySpend: 2,
+            now: instant
+        )
+        check(openRouter.needsOpenRouterBudget, "an unbudgeted OpenRouter reading must suppress its empty block")
+        let report = Report(providers: [openRouter], date: instant)
+        let rebudgeted = report.rebudgetingOpenRouter(monthlyBudget: 40, now: instant)
+        let provider = rebudgeted.providers[0]
+
+        check(provider.ok && provider.error == nil, "setting a budget must activate a validated reading")
+        check(!provider.needsOpenRouterBudget, "a budgeted OpenRouter reading must show its provider block")
+        check(provider.plan == "$40/mo", "the budget must become the plan badge")
+        check(close(provider.windows[0].budgetUSD, 40.0 / 30.0), "the daily allowance must be recomputed")
+        check(close(provider.windows[1].percent, 5), "$2 of $40 must be 5%")
+    }
+
+    private static func testOpenCodeOpenRouterCredentialIsParsed() {
+        let fixture = Data(#"{"openrouter":{"type":"api","key":"sk-or-test-open-code"},"lmstudio":{"type":"api","key":"local"}}"#.utf8)
+        check(
+            OpenRouterCredential.key(inOpenCodeAuth: fixture) == "sk-or-test-open-code",
+            "the standard OpenCode OpenRouter credential must be detected"
+        )
+        check(OpenRouterCredential.key(inOpenCodeAuth: Data("{}".utf8)) == nil, "a missing credential stays missing")
+    }
+
+    private static func testConductorCredentialEnvironmentIsParsed() {
+        let processList = """
+          123 /usr/bin/something
+          456 /Users/me/Library/Application Support/com.conductor.app/agent-binaries/acp-providers/opencode/1.18.29/darwin-arm64/opencode acp
+          789 /opt/homebrew/bin/opencode
+        """
+        check(OpenRouterCredential.conductorPIDs(in: processList) == [456], "only Conductor's OpenCode ACP process qualifies")
+
+        let environment = "PATH=/usr/bin HOME=/Users/me OPENROUTER_API_KEY=sk-or-test-conductor OTHER_SECRET=ignore"
+        check(
+            OpenRouterCredential.key(inProcessEnvironment: environment) == "sk-or-test-conductor",
+            "the OpenRouter value must be extracted from a process environment"
+        )
+        check(
+            OpenRouterCredential.key(inProcessEnvironment: "PATH=/usr/bin") == nil,
+            "an environment without OpenRouter must not yield a key"
+        )
+    }
+
+    private static func testOpenRouterDollarFormatting() {
+        check(OpenRouterBudget.dollars(20) == "$20", "whole budgets should omit cents")
+        check(OpenRouterBudget.dollars(0.105751342) == "$0.1", "spend should round to one decimal")
+        check(OpenRouterBudget.dollars(12.34) == "$12.3", "larger values should use the same precision")
+
+        let costWindow = UsageWindow(
+            label: "day", percent: 15, resetsAt: nil, windowSeconds: nil,
+            spentUSD: 0.1, budgetUSD: 0.7
+        )
+        check(
+            Pace.tooltip(source: nil, window: costWindow, showsCost: true).contains("$0.1 / $0.7"),
+            "the optional cost tooltip must include rounded dollars"
+        )
+        check(
+            !Pace.tooltip(source: nil, window: costWindow, showsCost: false).contains("$"),
+            "disabling dollar values must also hide them from the menu bar tooltip"
+        )
+    }
+
+    // ----------------------------------------------------------------- //
     // What the menu bar speaks for.
     // ----------------------------------------------------------------- //
 
@@ -151,7 +295,11 @@ enum RegressionTests {
     // ----------------------------------------------------------------- //
 
     private static func testShippedIconsParse() {
-        for file in ["claude.svg", "openai.svg"] {
+        for (provider, file) in [
+            ("Claude", "claude.svg"),
+            ("Codex", "openai.svg"),
+            ("OpenRouter", "openrouter.svg"),
+        ] {
             guard let directory = BrandGlyph.iconDirectory else {
                 check(false, "icon directory must resolve")
                 return
@@ -165,19 +313,35 @@ enum RegressionTests {
                 check(false, "\(file) must parse into a path")
                 return
             }
-            // Both marks are authored to fill a 24×24 box; a mangled parse
-            // lands well inside it or spills far outside.
+            // All shipped marks must remain non-trivial outlines.
             let bounds = path.bounds
             check(
-                bounds.minX >= -0.5 && bounds.minY >= -0.5
-                    && bounds.maxX <= 24.5 && bounds.maxY <= 24.5,
-                "\(file) must stay inside its 24×24 box, got \(bounds)"
+                bounds.width > 14 && bounds.height > 14,
+                "\(file) must remain a legible outline, got \(bounds)"
             )
+            guard let fitted = BrandGlyph.path(
+                for: provider,
+                fitting: NSSize(width: 24, height: 24),
+                flipped: false
+            ) else {
+                check(false, "\(file) must fit into a provider mark")
+                return
+            }
             check(
-                bounds.width > 20 && bounds.height > 20,
-                "\(file) must fill its 24×24 box, got \(bounds)"
+                fitted.bounds.minX >= -0.1 && fitted.bounds.minY >= -0.1
+                    && fitted.bounds.maxX <= 24.1 && fitted.bounds.maxY <= 24.1,
+                "\(file) must fit uniformly inside 24×24, got \(fitted.bounds)"
             )
         }
+
+        check(
+            close(BrandGlyph.width(for: "Claude", height: 14), 14),
+            "square provider marks must keep a square slot"
+        )
+        check(
+            close(BrandGlyph.width(for: "OpenRouter", height: 14), 14),
+            "OpenRouter's compact mark must keep a square slot"
+        )
     }
 
     private static func testArcFlagsAreReadOneCharacterWide() {

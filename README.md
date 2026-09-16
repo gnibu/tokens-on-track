@@ -2,9 +2,10 @@
 
 **Use every token. Never run dry.**
 
-Tokens on Track is a macOS menu bar app showing how much of your **Claude Code** and **Codex**
-quota you have burned, and whether you are burning it faster than the window
-refills. Refreshes every 15 minutes, and tells you when you are running hot.
+Tokens on Track is a macOS menu bar app showing how much of your **Claude Code**
+and **Codex** quota you have burned, plus **OpenRouter** spend against a budget
+you choose. It shows whether you are spending faster than the window refills,
+refreshes every 15 minutes, and tells you when you are running hot.
 
 <img src="docs/screenshots/menubar.png" width="163" alt="The menu bar item: a Claude mark with a green ring at 70% marked w, and a second at 53% marked h.">
 
@@ -24,6 +25,9 @@ week        ▓▓▓▓┃──────   22%  Sat 21:00
 Codex                              PRO
 week        ▓───┃──────    3%  Mon 08:34
 spark week  ▓───┃──────    1%  Mon 08:36
+OpenRouter                       $20/MO
+day         ▓▓──┃──────   16%     00:00
+month       ▓───┃──────    1%  Wed 00:00
 ```
 
 - **Bar** — quota consumed in that window.
@@ -51,9 +55,8 @@ Gatekeeper does not block it on a Mac that has never seen it. macOS may still as
 you to confirm the first launch of a downloaded app; that is the ordinary prompt,
 not the *"cannot be opened"* refusal. Nothing to compile, no developer tools needed.
 
-**Requirements:** macOS 14+, and Claude Code and/or Codex already logged in.
-Either provider can be missing — you get a per-provider error rather than a
-failure.
+**Requirements:** macOS 14+, and at least one supported provider already set
+up. Any provider can be missing without affecting the others.
 
 Prefer to build it yourself? See [Building from source](#building-from-source).
 
@@ -95,7 +98,9 @@ again.
 
 The Settings tab groups them the way System Settings does: *Menu bar* (which
 parts to draw, how many windows), *Display* (whether percentages show *Used* or
-*Vs target*, desktop card on/off, its layer, open at login), *Working hours*
+*Vs target*, desktop card on/off, its layer, open at login), *OpenRouter*
+(connection, optional API key, one monthly USD budget, and optional dollar
+details), *Working hours*
 (selected days and one shared time range), *Alerts* (both thresholds, on
 sliders rather than steppers), and *Refresh* (5, 15, 30 or 60 minutes).
 
@@ -135,7 +140,8 @@ bar ring, the dropdown and the desktop card can never disagree.
 
 | Source file | Job |
 | --- | --- |
-| `Fetcher.swift` | reads both credential stores, calls both usage APIs |
+| `Fetcher.swift` | discovers credentials and calls the three usage APIs |
+| `OpenRouter.swift` | derives daily and monthly budget windows from spend |
 | `Report.swift` | the JSON written to the cache |
 | `WorkSchedule.swift` | local working intervals, DST and schedule boundaries |
 | `Pace.swift` | target share, active time basis, pace rate, colours, reset labels |
@@ -152,10 +158,12 @@ bar ring, the dropdown and the desktop card can never disagree.
 | --- | --- | --- |
 | Claude | Keychain item `Claude Code-credentials` (written by Claude Code) | `GET api.anthropic.com/api/oauth/usage` |
 | Codex | `~/.codex/auth.json` (written by the Codex CLI) | `GET chatgpt.com/backend-api/codex/usage` |
+| OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
 
-Both are the same first-party endpoints the CLIs themselves call, and both are
-**undocumented internal APIs**. They can change shape or start rejecting
-non-CLI callers without notice. That is the most likely way this breaks.
+The Claude and Codex endpoints are the same first-party endpoints the CLIs
+themselves call, and both are **undocumented internal APIs**. They can change
+shape or start rejecting non-CLI callers without notice. OpenRouter uses its
+documented key endpoint.
 
 Which windows appear depends on what each API returns for your plan:
 
@@ -165,19 +173,29 @@ Which windows appear depends on what each API returns for your plan:
   as their own row. On Pro today only weekly windows come back —
   `secondary_window` is `null`. If a 5-hour window reappears it is rendered with
   no change.
+- OpenRouter reports dollar spend. Enter one monthly budget in Settings; the
+  app divides it by the number of UTC days in the current month for the daily
+  row, while the monthly row uses the full amount. A disabled-by-default setting
+  can show rounded spend and allowance beneath each percentage. Until a budget
+  is defined, the app shows one setup notice instead of an empty provider block.
 
 ## Security
 
 Worth understanding before running something that touches your API credentials.
 
-- Reads the Claude OAuth token via `/usr/bin/security` and the Codex token from
-  `~/.codex/auth.json` — the two stores the CLIs already maintain.
+- Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
+  `~/.codex/auth.json`, and an OpenRouter key from the first available configured
+  source. A key entered in Settings is stored in the app's own Keychain item.
+- Conductor's OpenRouter key is available only inside its managed OpenCode
+  process. While that process is running, the app can read its same-user process
+  environment as a best-effort fallback; it never copies that key into storage.
 - Sends each token *only* to its own provider's host. No third party, no
   telemetry, no analytics.
 - Never prints or logs a token. The cache holds percentages, reset timestamps
   and plan names — nothing secret.
-- Read-only on both credential stores. It never writes or refreshes tokens, so
-  it cannot invalidate either CLI's login.
+- Read-only on provider-owned credential stores. It never writes or refreshes
+  their tokens. Only a key explicitly entered in Settings is written, and only
+  to the app's own Keychain item.
 - No dependencies beyond the system frameworks. The app's own supply chain is
   this repo and nothing else. Read it; it is short.
 - **Downloading is a wider trust decision than building.** Take the `.dmg` and you

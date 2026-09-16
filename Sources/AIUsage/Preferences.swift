@@ -125,6 +125,24 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(refreshMinutes, forKey: Keys.refreshMinutes) }
     }
 
+    /// Local display budget for OpenRouter. The API key itself never belongs
+    /// in UserDefaults; it is either discovered or stored in Keychain.
+    @Published var openRouterMonthlyBudget: Double? {
+        didSet {
+            if let value = openRouterMonthlyBudget {
+                defaults.set(value, forKey: Keys.openRouterMonthlyBudget)
+            } else {
+                defaults.removeObject(forKey: Keys.openRouterMonthlyBudget)
+            }
+        }
+    }
+
+    /// Optional exact spend lines below OpenRouter's percentage rows. Off by
+    /// default to keep the ordinary provider layout equally compact.
+    @Published var showOpenRouterCosts: Bool {
+        didSet { defaults.set(showOpenRouterCosts, forKey: Keys.showOpenRouterCosts) }
+    }
+
     /// Providers the user has chosen not to see, by name. A never-set-up
     /// provider is hidden automatically; this is for hiding one you *do* have.
     @Published var hiddenProviders: Set<String> {
@@ -171,6 +189,8 @@ final class Preferences: ObservableObject {
         static let paceThreshold = "paceThreshold"
         static let paceAlerts = "paceAlertsEnabled"
         static let refreshMinutes = "refreshMinutes"
+        static let openRouterMonthlyBudget = "openRouterMonthlyBudget"
+        static let showOpenRouterCosts = "showOpenRouterCosts"
         static let hiddenProviders = "hiddenProviders"
         static let hideSparkSession = "hideSparkSession"
         static let hideSparkWeek = "hideSparkWeek"
@@ -204,6 +224,7 @@ final class Preferences: ObservableObject {
             Keys.paceThreshold: 1.5,
             Keys.paceAlerts: true,
             Keys.refreshMinutes: 15.0,
+            Keys.showOpenRouterCosts: false,
             Keys.hideSparkSession: true,
             Keys.hideSparkWeek: false,
         ])
@@ -231,6 +252,13 @@ final class Preferences: ObservableObject {
         paceThreshold = defaults.double(forKey: Keys.paceThreshold)
         paceAlertsEnabled = defaults.bool(forKey: Keys.paceAlerts)
         refreshMinutes = defaults.double(forKey: Keys.refreshMinutes)
+        if defaults.object(forKey: Keys.openRouterMonthlyBudget) != nil {
+            let value = defaults.double(forKey: Keys.openRouterMonthlyBudget)
+            openRouterMonthlyBudget = value.isFinite && value > 0 ? value : nil
+        } else {
+            openRouterMonthlyBudget = nil
+        }
+        showOpenRouterCosts = defaults.bool(forKey: Keys.showOpenRouterCosts)
         hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
 
         // Anyone who had the old all-or-nothing spark switch on expects every

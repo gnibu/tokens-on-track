@@ -8,6 +8,8 @@ mkdir -p .build
 
 swiftc -parse-as-library \
     Sources/AIUsage/Report.swift \
+    Sources/AIUsage/OpenRouter.swift \
+    Sources/AIUsage/OpenRouterKeychain.swift \
     Sources/AIUsage/WorkSchedule.swift \
     Sources/AIUsage/Pace.swift \
     Sources/AIUsage/Fetcher.swift \

@@ -218,9 +218,13 @@ enum Pace {
         source: String?,
         window: UsageWindow,
         explains: Bool = true,
+        showsCost: Bool = true,
         timing: Timing = Timing()
     ) -> String {
-        let spent = "\(Int(window.percent.rounded()))% of the budget spent"
+        let dollars = showsCost
+            ? OpenRouterBudget.detail(for: window).map { " · \($0)" } ?? ""
+            : ""
+        let spent = "\(Int(window.percent.rounded()))% of the budget spent\(dollars)"
         let lead = source.map { "\($0) — " } ?? ""
         let target = target(window, timing: timing)
 
