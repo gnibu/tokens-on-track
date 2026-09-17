@@ -7,10 +7,23 @@ generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/
 
 ## [Unreleased]
 
+### Added
+
+- A refresh button on the desktop card, and a spinner on both refresh buttons
+  while a poll is in flight.
+
 ### Changed
 
 - The default refresh interval is 10 minutes (was 15), and 10 is now a
   selectable interval alongside 5, 15, 30 and 60.
+- A poll that lands nothing now says the app keeps retrying by itself, instead
+  of leaving "No reading yet" looking like a dead end. A provider with no
+  reading is named once by the outage line rather than given an empty block of
+  its own.
+- Polling is now per provider: one that cannot be reached is retried every
+  minute on its own, while the providers that answer keep the configured
+  interval instead of being asked alongside it. A rejected token or key keeps
+  the normal interval.
 
 ## [1.1.0] - 2026-09-16
 

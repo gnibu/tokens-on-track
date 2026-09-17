@@ -25,14 +25,16 @@ everything they were built from. The compile is not what that saves — swift
 build is already incremental — it is the notary queue, which took over an hour
 on this team's first submission.
 
---publish is checked before the build, not after, so a missing gh login, a
-version that was never bumped, or a commit that has not landed on main fails
-in the first second rather than after two compiles and two round trips to
-Apple's notary queue.
+--publish is checked before the build, not after, so a missing gh login or a
+commit that has not landed on main fails in the first second rather than after
+two compiles and two round trips to Apple's notary queue.
 
-Bump CFBundleShortVersionString and CFBundleVersion in Resources/Info.plist
-before each release; both are read from there, so the plist stays the single
-source of truth.
+The version is not bumped by hand. CFBundleShortVersionString in
+Resources/Info.plist names only the major.minor train to release; the patch
+auto-increments from the highest v<major>.<minor>.* tag already published, and
+CFBundleVersion is the HEAD commit count. Both are injected into the built
+bundle, so a routine release touches no version string, and a deliberate minor
+or major bump is the single act of editing the train in the plist.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ from __future__ import annotations
 import argparse
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -367,7 +370,7 @@ def compile_universal(work: Path) -> Path:
     return fused
 
 
-def assemble(bundle: Path, binary: Path) -> None:
+def assemble(bundle: Path, binary: Path, version: str, build: str) -> None:
     step(f"assembling {bundle}")
     macos = bundle / "Contents" / "MacOS"
     resources = bundle / "Contents" / "Resources"
@@ -375,7 +378,16 @@ def assemble(bundle: Path, binary: Path) -> None:
     resources.mkdir(parents=True)
 
     shutil.copy2(binary, macos / BINARY_NAME)
-    shutil.copy2("Resources/Info.plist", bundle / "Contents" / "Info.plist")
+    # The source plist names only the release train (see next_version); the
+    # exact version and build are computed and stamped into the bundle here.
+    info_path = bundle / "Contents" / "Info.plist"
+    shutil.copy2("Resources/Info.plist", info_path)
+    with open(info_path, "rb") as handle:
+        info = plistlib.load(handle)
+    info["CFBundleShortVersionString"] = version
+    info["CFBundleVersion"] = build
+    with open(info_path, "wb") as handle:
+        plistlib.dump(info, handle)
     shutil.copy2("Resources/AppIcon.icns", resources / "AppIcon.icns")
     shutil.copytree("Resources/Icons", resources / "Icons")
     (bundle / "Contents" / "PkgInfo").write_text("APPL????", encoding="ascii")
@@ -517,6 +529,30 @@ def git_out(args: Sequence[str]) -> str:
     return run(["git", *args]).strip()
 
 
+def next_version(train: str) -> tuple[str, str]:
+    """Derive the release version without a manual bump.
+
+    `train` is CFBundleShortVersionString: only its major.minor is read, the one
+    knob a human turns and only for a deliberate minor or major release. The
+    patch is the highest v<major>.<minor>.* tag already published locally or on
+    origin, plus one (0 when the train is fresh), so routine releases never
+    touch a version string. CFBundleVersion is the HEAD commit count: monotonic
+    by construction, so it needs no bumping either.
+    """
+    major, minor = (int(p) for p in train.split(".")[:2])
+    pattern = re.compile(rf"^v{major}\.{minor}\.(\d+)$")
+
+    names = git_out(["tag", "--list", f"v{major}.{minor}.*"]).splitlines()
+    for line in git_out(
+        ["ls-remote", "--tags", "origin", f"v{major}.{minor}.*"]
+    ).splitlines():
+        names.append(line.split("/")[-1].removesuffix("^{}"))
+
+    patches = [int(m.group(1)) for name in names if (m := pattern.match(name.strip()))]
+    patch = max(patches) + 1 if patches else 0
+    return f"{major}.{minor}.{patch}", git_out(["rev-list", "--count", "HEAD"])
+
+
 def require_main_commit(head: str, main: str) -> None:
     """Refuse tags that GitHub cannot place in main's release history.
 
@@ -546,15 +582,13 @@ def publish_preflight(tag: str) -> None:
     if not quiet_ok(["gh", "auth", "status"]):
         fail("gh is not authenticated. Run: gh auth login")
 
+    # next_version already skips every published tag, so a collision here means
+    # a tag was created out of band. Fail loudly rather than clobber it.
     if quiet_ok(["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"]):
-        fail(
-            f"tag {tag} already exists locally.\n"
-            "Bump CFBundleShortVersionString in Resources/Info.plist, or delete\n"
-            f"the tag with: git tag -d {tag}"
-        )
+        fail(f"tag {tag} unexpectedly exists locally. Delete it: git tag -d {tag}")
 
     if git_out(["ls-remote", "--tags", "origin", tag]):
-        fail(f"tag {tag} already exists on origin. Bump the version.")
+        fail(f"tag {tag} unexpectedly exists on origin: git push --delete origin {tag}")
 
     # A published binary should be reproducible from the public main branch.
     # In particular, a pushed PR head is not sufficient: squash-merging gives
@@ -635,8 +669,7 @@ def preflight(identity: str, profile: str, publishing: bool) -> tuple[str, str]:
 
     with open("Resources/Info.plist", "rb") as handle:
         info = plistlib.load(handle)
-    version = str(info["CFBundleShortVersionString"])
-    build = str(info["CFBundleVersion"])
+    version, build = next_version(str(info["CFBundleShortVersionString"]))
 
     table = Table.grid(padding=(0, 2))
     table.add_column(style="dim")
@@ -662,7 +695,7 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
     identity = resolve_identity(setting("DEVELOPER_ID", dotenv))
     profile = setting("NOTARY_PROFILE", dotenv, "tokens-on-track-notary")
 
-    version, _ = preflight(identity, profile, publishing)
+    version, build = preflight(identity, profile, publishing)
 
     bundle = DIST_DIR / f"{APP_NAME}.app"
     dmg = DIST_DIR / f"{ASSET_NAME}-{version}.dmg"
@@ -682,7 +715,7 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
         work = Path(tmp)
 
         binary = compile_universal(work)
-        assemble(bundle, binary)
+        assemble(bundle, binary, version, build)
 
         step("signing app")
         sign(bundle, identity, hardened=True)

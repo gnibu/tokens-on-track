@@ -17,11 +17,32 @@ enum Fetcher {
 
     static let timeout: TimeInterval = 20
 
-    static func fetchAll(openRouterMonthlyBudget: Double?) async -> Report {
-        async let claude = fetchClaude()
-        async let codex = fetchCodex()
-        async let openRouter = fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
-        return await Report(providers: [claude, codex, openRouter])
+    /// The providers this app knows how to poll, in display order. Named so the
+    /// store can schedule each one on its own cadence.
+    static let providerNames = ["Claude", "Codex", "OpenRouter"]
+
+    /// Fetch every named provider, concurrently. A provider left out is one the
+    /// caller has decided is not due yet.
+    static func fetch(names: [String], openRouterMonthlyBudget: Double?) async -> [Provider] {
+        await withTaskGroup(of: Provider.self) { group in
+            for name in names {
+                group.addTask {
+                    await fetch(name, openRouterMonthlyBudget: openRouterMonthlyBudget)
+                }
+            }
+            var providers: [Provider] = []
+            for await provider in group { providers.append(provider) }
+            return providers
+        }
+    }
+
+    static func fetch(_ name: String, openRouterMonthlyBudget: Double?) async -> Provider {
+        switch name {
+        case "Claude": return await fetchClaude()
+        case "Codex": return await fetchCodex()
+        case "OpenRouter": return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
+        default: return Provider(name: name)
+        }
     }
 
     // ----------------------------------------------------------------- //
@@ -55,6 +76,7 @@ enum Fetcher {
             return provider
         } catch {
             provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+            provider.unreachable = true
             return provider
         }
 
@@ -107,6 +129,7 @@ enum Fetcher {
             return provider
         } catch {
             provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+            provider.unreachable = true
             return provider
         }
 
@@ -175,6 +198,7 @@ enum Fetcher {
                 return provider
             } catch {
                 provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+                provider.unreachable = true
                 return provider
             }
         }
