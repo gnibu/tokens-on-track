@@ -437,18 +437,44 @@ struct GlassSwitch: View {
     }
 }
 
+/// The loader the glass uses: a short arc turning at a steady clip. AppKit's
+/// own spinner brings a heavier, greyer look that reads as a foreign object on
+/// the pane, and it cannot carry the design's translucent white.
+struct GlassSpinner: View {
+    var size: CGFloat = 12
+    var color: Color = Glass.ink(0.8)
+
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.68)
+            .stroke(color, style: StrokeStyle(lineWidth: max(1.4, size * 0.15), lineCap: .round))
+            .frame(width: size, height: size)
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: turning)
+            .onAppear { turning = true }
+    }
+}
+
 /// The small glass button in a header — refresh, settings.
 struct GlassButton: View {
     let label: String
     var systemImage: String?
     var prominent: Bool = false
     var enabled: Bool = true
+    /// Swaps the icon for a spinner while the action it started is in flight,
+    /// so pressing refresh reads as something happening rather than as a click
+    /// that did nothing.
+    var spinning: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let systemImage {
+                if spinning {
+                    GlassSpinner(size: 12)
+                } else if let systemImage {
                     Image(systemName: systemImage).font(.system(size: 12, weight: .medium))
                 }
                 if !label.isEmpty {

@@ -47,7 +47,12 @@ struct PanelView: View {
             )
 
             if tab == .usage {
-                GlassButton(label: "", systemImage: "arrow.clockwise", enabled: !store.isRefreshing) {
+                GlassButton(
+                    label: "",
+                    systemImage: "arrow.clockwise",
+                    enabled: !store.isRefreshing,
+                    spinning: store.isRefreshing
+                ) {
                     Task { await store.refresh() }
                 }
                 .help("Refresh now")
@@ -59,18 +64,24 @@ struct PanelView: View {
 
     private var usageFooter: some View {
         HStack(spacing: 12) {
-            Text(footerText)
-                .font(.system(size: 11))
-                .foregroundStyle(Glass.ink(0.4))
+            HStack(spacing: 6) {
+                if store.isOffline {
+                    GlassSpinner(size: 11)
+                }
+                Text(footerText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Glass.ink(0.4))
+            }
             Spacer(minLength: 8)
             GlassLink(title: "Quit") { NSApplication.shared.terminate(nil) }
         }
     }
 
     private var footerText: String {
-        let every = "every \(Int(Preferences.shared.refreshMinutes)) min"
-        guard let report = store.report else { return "No reading yet · \(every)" }
+        let every = store.retryCadenceLabel
+        guard let report = store.report else { return "No reading yet · retrying \(every)" }
         if store.isRefreshing { return "Refreshing… · \(every)" }
+        if report.hasNoReading { return "No reading yet · retrying \(every)" }
         let stale = report.isStale ? " (stale)" : ""
         return "Updated \(report.updatedLabel)\(stale) · \(every)"
     }

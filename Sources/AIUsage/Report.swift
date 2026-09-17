@@ -91,6 +91,11 @@ struct Provider: Codable, Identifiable, Equatable {
     /// never set up has nothing worth a row and no logo worth drawing, so it is
     /// hidden entirely rather than shown as an empty block.
     var loggedIn: Bool = false
+    /// True when the last poll could not reach the provider at all — the
+    /// offline case, as opposed to a token or key the provider itself rejected.
+    /// Only this brings the retry down to a minute; the others cannot be fixed
+    /// by asking again, and hammering the endpoint would be rude.
+    var unreachable: Bool = false
     /// Non-secret origin of the credential that produced this reading. It is
     /// shown in Settings and harmless in the cache.
     var credentialSource: OpenRouterCredential.Source?
@@ -106,6 +111,7 @@ struct Provider: Codable, Identifiable, Equatable {
         case stale
         case measuredAt = "measured_at"
         case loggedIn = "logged_in"
+        case unreachable
         case credentialSource = "credential_source"
     }
 
@@ -142,6 +148,7 @@ struct Provider: Codable, Identifiable, Equatable {
         // logged in, so fall back to that rather than hiding it until the first
         // refresh lands.
         loggedIn = (try? box.decode(Bool.self, forKey: .loggedIn)) ?? ok
+        unreachable = (try? box.decode(Bool.self, forKey: .unreachable)) ?? false
         credentialSource = try? box.decodeIfPresent(OpenRouterCredential.Source.self, forKey: .credentialSource)
     }
 }
@@ -315,6 +322,31 @@ struct Report: Codable, Equatable {
     /// A reading older than this is shown as stale rather than silently trusted.
     var isStale: Bool {
         Date().timeIntervalSince1970 - Double(updatedAt) > 2700
+    }
+
+    /// True when a poll has run and nothing landed: providers are set up, but
+    /// not one of them produced a window and there was no recent reading to
+    /// carry over. A poll that failed is not the end of the story — the timer
+    /// asks again — so the surfaces use this to promise the automatic retry
+    /// instead of leaving an empty card looking final. A provider that was
+    /// never set up is not a retry, and neither is OpenRouter waiting on a
+    /// budget: no poll will fix either one.
+    var hasNoReading: Bool {
+        let set = providers.filter { $0.loggedIn && !$0.needsOpenRouterBudget }
+        guard !set.isEmpty else { return false }
+        return !set.contains { $0.ok && !$0.windows.isEmpty }
+    }
+
+    /// True when the last poll could not reach anyone: every provider that can
+    /// be polled is unreachable. One blocked host among reachable ones is not
+    /// this — the others landed and must keep the user's interval instead of
+    /// being polled fifteen times more often. A stale token, a rejected key or
+    /// a missing budget is not this either. Used to poll again in a minute
+    /// rather than wait out the user's interval for the card to fill back in.
+    var needsFastRetry: Bool {
+        let set = providers.filter { $0.loggedIn && !$0.needsOpenRouterBudget }
+        guard !set.isEmpty else { return false }
+        return set.allSatisfy(\.unreachable)
     }
 
     /// How long ago the reading landed, in the card's second line. The absolute

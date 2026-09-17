@@ -28,6 +28,34 @@ final class UsageStore: ObservableObject {
 
     static var cacheURL: URL { stateDirectory.appendingPathComponent("usage.json") }
 
+    /// How quickly to come back after a poll could not reach anyone. The
+    /// user's interval otherwise; a minute is short enough that coming back
+    /// from offline does not leave the card blank for a quarter of an hour.
+    static let offlineRetryInterval: TimeInterval = 60
+
+    /// The cadence the reader is told about: the user's interval, or a minute
+    /// while every pollable provider is unreachable.
+    var displayedCadence: TimeInterval {
+        let configured = max(60, Preferences.shared.refreshMinutes * 60)
+        guard report?.needsFastRetry == true else { return configured }
+        return min(configured, Self.offlineRetryInterval)
+    }
+
+    /// True while the last poll could not reach anyone, so surfaces can show a
+    /// loader next to the retry line rather than a static promise.
+    var isOffline: Bool {
+        report?.needsFastRetry == true
+    }
+
+    /// The same interval said for the reader: "every minute", "every 15 min".
+    var retryCadenceLabel: String {
+        let minutes = Int((displayedCadence / 60).rounded())
+        return minutes == 1 ? "every minute" : "every \(minutes) min"
+    }
+
+    /// When each provider was last asked. Providers are polled on their own
+    /// cadence, so this, not the report's clock, decides who is due.
+    private var lastAttempt: [String: Date] = [:]
     private var refreshTimer: Timer?
     private var scheduleBoundaryTimer: Timer?
     private var workSchedule = WorkSchedule.disabled
@@ -45,7 +73,7 @@ final class UsageStore: ObservableObject {
 
         preferences.$refreshMinutes
             .removeDuplicates()
-            .sink { [weak self] minutes in self?.scheduleTimer(minutes: minutes) }
+            .sink { [weak self] _ in self?.scheduleTimer() }
             .store(in: &preferenceWatches)
 
         preferences.$openRouterMonthlyBudget
@@ -133,18 +161,79 @@ final class UsageStore: ObservableObject {
         )
     }
 
+    /// Ask every provider now: the refresh button, wake, launch, and the
+    /// normal interval.
     func refresh() async {
+        await refresh(names: Fetcher.providerNames, full: true)
+    }
+
+    /// The timer's job: ask only the providers whose own cadence has come due,
+    /// so an unreachable one is retried every minute while the rest keep the
+    /// user's interval and are not hammered alongside it.
+    private func refreshDue() async {
+        let due = dueNames(at: Date())
+        guard !due.isEmpty else {
+            scheduleTimer()
+            return
+        }
+        // Asking everyone is the normal interval again, so it stamps the
+        // report's clock; a lone retry of a provider in trouble does not.
+        let full = due.count == Fetcher.providerNames.count
+        await refresh(names: due, full: full)
+    }
+
+    private func refresh(names: [String], full: Bool) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
-        let merged = (await Fetcher.fetchAll(
+        // Charge each poll from when it started, so a slow timeout cannot push
+        // the next try out past its cadence.
+        let started = Date()
+        for name in names { lastAttempt[name] = started }
+
+        let fetched = await Fetcher.fetch(
+            names: names,
             openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget
-        )).carryingOver(from: report)
+        )
+        let merged = merging(fetched, full: full, at: Date())
         report = merged
         write(merged)
         redrawIcon()
+        scheduleTimer()
         Notifier.evaluate(merged)
+    }
+
+    /// Fold a poll into the reading we already have. A full poll stamps the
+    /// report's clock; a partial one keeps it, since the providers it did not
+    /// ask are still only as fresh as that clock says.
+    private func merging(_ fetched: [Provider], full: Bool, at now: Date) -> Report {
+        let previous = report
+        var providers = previous?.providers ?? []
+        for provider in fetched {
+            if let index = providers.firstIndex(where: { $0.name == provider.name }) {
+                providers[index] = provider
+            } else {
+                providers.append(provider)
+            }
+        }
+        for name in Fetcher.providerNames
+        where !providers.contains(where: { $0.name == name }) {
+            providers.append(Provider(name: name))
+        }
+        // A task group hands results back in completion order, which would let
+        // the card's blocks shuffle between polls. Keep them in display order.
+        let order = Dictionary(
+            uniqueKeysWithValues: Fetcher.providerNames.enumerated().map { ($1, $0) }
+        )
+        providers.sort { (order[$0.name] ?? .max) < (order[$1.name] ?? .max) }
+
+        var merged = Report(providers: providers, date: now).carryingOver(from: previous, now: now)
+        if !full, let previous {
+            merged.updatedAt = previous.updatedAt
+            merged.updatedLabel = previous.updatedLabel
+        }
+        return merged
     }
 
     func refreshIfStale(olderThan seconds: TimeInterval) {
@@ -171,14 +260,44 @@ final class UsageStore: ObservableObject {
 
     // ----------------------------------------------------------------- //
 
-    private func scheduleTimer(minutes: Double) {
-        refreshTimer?.invalidate()
-        let interval = max(60, minutes * 60)
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+    /// Each provider's own cadence: a minute while it is unreachable, the
+    /// user's interval otherwise.
+    private func cadence(for name: String, configured: TimeInterval) -> TimeInterval {
+        let provider = report?.providers.first { $0.name == name }
+        return provider?.unreachable == true
+            ? min(configured, Self.offlineRetryInterval)
+            : configured
+    }
+
+    private func dueNames(at now: Date) -> [String] {
+        let configured = max(60, Preferences.shared.refreshMinutes * 60)
+        return Fetcher.providerNames.filter { name in
+            let last = lastAttempt[name] ?? .distantPast
+            return now >= last.addingTimeInterval(cadence(for: name, configured: configured))
         }
-        // Let the system coalesce the wake-up; a minute either way is fine.
-        timer.tolerance = interval * 0.2
+    }
+
+    private func nextDelay(now: Date = Date()) -> TimeInterval {
+        let configured = max(60, Preferences.shared.refreshMinutes * 60)
+        let soonest = Fetcher.providerNames.map { name -> TimeInterval in
+            let last = lastAttempt[name] ?? .distantPast
+            return last
+                .addingTimeInterval(cadence(for: name, configured: configured))
+                .timeIntervalSince(now)
+        }.min() ?? configured
+        return max(1, soonest)
+    }
+
+    /// One poll of whatever is due, then schedule the next. A one-shot rather
+    /// than a repeating timer so each provider's own cadence can take effect.
+    private func scheduleTimer() {
+        refreshTimer?.invalidate()
+        let delay = nextDelay()
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in await self?.refreshDue() }
+        }
+        // Let the system coalesce the wake-up; a little either way is fine.
+        timer.tolerance = delay * 0.2
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
     }
@@ -213,7 +332,7 @@ final class UsageStore: ObservableObject {
             )
         }
         statusTooltip = lines.isEmpty
-            ? "Tokens on Track — no reading yet"
+            ? "Tokens on Track — no reading yet · retrying \(retryCadenceLabel)"
             : (lines + [Pace.targetExplainer]).joined(separator: "\n")
 
         var parts: StatusIcon.Parts = []

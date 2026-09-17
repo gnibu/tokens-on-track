@@ -49,12 +49,21 @@ struct DesktopUsageCard: View {
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
-        let blocks = shown.filter { !$0.needsOpenRouterBudget }
+        // A provider with nothing to draw is named once by `OutageNotice`
+        // above; an empty block under it only repeats that. So the blocks are
+        // the providers with a reading, and a carried one still counts.
+        let blocks = shown.filter(\.hasVisibleReading)
+        let noReading = display?.hasNoReading ?? false
+        let retrying = noReading || (display?.needsFastRetry ?? false)
 
         VStack(alignment: .leading, spacing: 18) {
-            header(verdict)
+            header(verdict, noReading: noReading)
 
             OutageNotice(providers: shown, size: 12)
+
+            if retrying {
+                RetryNotice(size: 12)
+            }
 
             Glass.hairline
 
@@ -77,8 +86,8 @@ struct DesktopUsageCard: View {
         }
     }
 
-    private func header(_ verdict: Pace.Verdict) -> some View {
-        HStack(spacing: 14) {
+    private func header(_ verdict: Pace.Verdict, noReading: Bool) -> some View {
+        HStack(spacing: 12) {
             UsageRing(
                 percent: verdict.percent,
                 color: verdict.color,
@@ -105,12 +114,31 @@ struct DesktopUsageCard: View {
                     .font(.system(size: 13))
                     .monospacedDigit()
                     .foregroundStyle(Glass.ink(0.7))
-                Text(store.isRefreshing ? "refreshing…" : (store.report?.ageLabel() ?? "never"))
+                Text(statusText(noReading: noReading))
                     .font(.system(size: 11))
                     .foregroundStyle(Glass.ink(0.4))
             }
             .fixedSize()
+
+            GlassButton(
+                label: "",
+                systemImage: "arrow.clockwise",
+                enabled: !store.isRefreshing,
+                spinning: store.isRefreshing
+            ) {
+                Task { await store.refresh() }
+            }
+            .help("Refresh now")
         }
+    }
+
+    /// The second line of the clock column. "just now" is when the poll ran, not
+    /// when a reading landed, so a failed poll says so instead of claiming a
+    /// freshness the card cannot back up.
+    private func statusText(noReading: Bool) -> String {
+        if store.isRefreshing { return "refreshing…" }
+        if noReading { return "retrying…" }
+        return store.report?.ageLabel() ?? "never"
     }
 }
 
@@ -129,7 +157,7 @@ struct MenuUsageView: View {
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
-        let blocks = shown.filter { !$0.needsOpenRouterBudget }
+        let blocks = shown.filter(\.hasVisibleReading)
 
         VStack(alignment: .leading, spacing: 16) {
             summary(verdict)
@@ -237,6 +265,26 @@ struct OutageNotice: View {
 
 // --------------------------------------------------------------------- //
 
+/// A poll has run and nothing landed. Rather than let the empty card read as a
+/// dead end, one line says the app keeps asking by itself — the refresh button
+/// beside it is for retrying now rather than waiting out the interval.
+struct RetryNotice: View {
+    @EnvironmentObject private var store: UsageStore
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: 7) {
+            GlassSpinner(size: size + 1)
+            Text("Retrying automatically \(store.retryCadenceLabel)")
+                .font(.system(size: size))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(Glass.ink(0.55))
+    }
+}
+
+// --------------------------------------------------------------------- //
+
 struct ProviderBlock: View {
     let provider: Provider
     let metrics: RowMetrics
@@ -278,30 +326,23 @@ struct ProviderBlock: View {
                 }
             }
 
-            // A provider whose reading is missing or stale-and-empty shows a
-            // single muted line rather than a row of zeroed-out bars, which read
-            // as broken. The reason and the age are carried once by
-            // `OutageNotice`, above the list. Carried non-zero rows are dimmed
-            // here, so they cannot be mistaken for numbers just measured.
-            if provider.hasVisibleReading {
-                VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
-                    ForEach(provider.windows) { window in
-                        UsageRow(
-                            window: window,
-                            metrics: metrics,
-                            mode: mode,
-                            timing: timing,
-                            showsCost: showsCost,
-                            isWorst: worstRow == Report.rowKey(provider: provider, window: window)
-                        )
-                    }
+            // Only providers with a reading reach here: one with nothing to
+            // draw is named once by `OutageNotice` instead of getting an empty
+            // block of its own. Carried rows are dimmed, so they cannot be
+            // mistaken for numbers just measured.
+            VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+                ForEach(provider.windows) { window in
+                    UsageRow(
+                        window: window,
+                        metrics: metrics,
+                        mode: mode,
+                        timing: timing,
+                        showsCost: showsCost,
+                        isWorst: worstRow == Report.rowKey(provider: provider, window: window)
+                    )
                 }
-                .opacity(provider.stale ? 0.55 : 1)
-            } else {
-                Text("no recent reading")
-                    .font(.system(size: metrics.labelSize))
-                    .foregroundStyle(Glass.ink(0.4))
             }
+            .opacity(provider.stale ? 0.55 : 1)
         }
     }
 

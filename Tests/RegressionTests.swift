@@ -33,6 +33,8 @@ enum RegressionTests {
         testFailedPollKeepsTheLastReading()
         testCarriedReadingIsDroppedOnceItIsOld()
         testCarriedWindowIsDroppedOnceItHasReset()
+        testHasNoReadingOnlyWhenAPollLandedNothing()
+        testOfflinePollAsksAgainSooner()
         testBudgetModeQuotesTheBudget()
         testTargetModeQuotesThePaceIndex()
         testTargetModeSaysNothingWhileTheWindowIsYoung()
@@ -534,6 +536,91 @@ enum RegressionTests {
         let onlySpent = Report(providers: [provider(name: "Claude", windows: [spent])], date: now)
         let emptied = Report(providers: [failed], date: later).carryingOver(from: onlySpent, now: later)
         check(!emptied.providers[0].ok, "a provider whose every carried window has reset is not ok")
+    }
+
+    private static func testHasNoReadingOnlyWhenAPollLandedNothing() {
+        // Set up but unreachable: the card must say the app is still trying,
+        // not that there is simply nothing.
+        var down = Provider(name: "Claude")
+        down.loggedIn = true
+        down.error = "unreachable — The Internet connection appears to be offline."
+        let failed = Report(providers: [down], date: now)
+        check(failed.hasNoReading, "a logged-in provider with no windows is a failed poll")
+
+        // Nothing set up at all: there is no poll to retry.
+        var absent = Provider(name: "Codex")
+        absent.error = "not logged in"
+        let empty = Report(providers: [absent], date: now)
+        check(!empty.hasNoReading, "a provider that was never set up is not a retry")
+
+        // A reading that landed is not "no reading".
+        let good = Report(
+            providers: [provider(name: "Claude", windows: [window(percent: 40, elapsedPercent: 50)])],
+            date: now
+        )
+        check(!good.hasNoReading, "a landed reading must not read as missing")
+
+        // A one-off failed poll keeps its last reading, so it is not missing
+        // either — the outage notice covers the staleness.
+        let later = now.addingTimeInterval(300)
+        let merged = Report(providers: [down], date: later).carryingOver(from: good, now: later)
+        check(!merged.hasNoReading, "a carried reading is something to draw")
+
+        // OpenRouter with no budget set is not a failed poll: no retry fixes it.
+        var unbudgeted = Provider(name: "OpenRouter")
+        unbudgeted.loggedIn = true
+        unbudgeted.error = OpenRouterBudget.missingBudgetMessage
+        unbudgeted.windows = [window(percent: 5, elapsedPercent: 10)]
+        let budgetless = Report(providers: [unbudgeted], date: now)
+        check(!budgetless.hasNoReading, "awaiting a budget is setup, not a retry")
+    }
+
+    private static func testOfflinePollAsksAgainSooner() {
+        // Nothing could be reached: retry on the short cadence.
+        var offline = Provider(name: "Claude")
+        offline.loggedIn = true
+        offline.error = "unreachable — The Internet connection appears to be offline."
+        offline.unreachable = true
+        check(
+            Report(providers: [offline], date: now).needsFastRetry,
+            "a poll that reached nobody must ask again sooner"
+        )
+
+        // One blocked host among reachable ones is not offline: the others
+        // answered, so they keep the user's interval.
+        let mixed = Report(providers: [
+            offline,
+            provider(name: "Codex", windows: [window(percent: 40, elapsedPercent: 50)]),
+        ], date: now)
+        check(
+            !mixed.needsFastRetry,
+            "one unreachable provider must not shorten everyone's interval"
+        )
+
+        // A token the provider rejected is not the offline case: asking again
+        // in a minute cannot fix it.
+        var rejected = Provider(name: "Codex")
+        rejected.loggedIn = true
+        rejected.error = "stored token went stale — run codex once"
+        check(
+            !Report(providers: [rejected], date: now).needsFastRetry,
+            "a rejection must not shorten the interval"
+        )
+
+        // A landed reading restores the user's cadence.
+        let good = Report(
+            providers: [provider(name: "Claude", windows: [window(percent: 40, elapsedPercent: 50)])],
+            date: now
+        )
+        check(!good.needsFastRetry, "a landed reading must not keep the short cadence")
+
+        // Going offline with a reading still in hand is still offline: the card
+        // keeps the carried rows and comes back in a minute.
+        let later = now.addingTimeInterval(300)
+        let carried = Report(providers: [offline], date: later).carryingOver(from: good, now: later)
+        check(carried.providers[0].stale, "the carried rows must be marked stale")
+        check(carried.providers[0].unreachable, "the offline reason must survive the carry")
+        check(carried.needsFastRetry, "an offline poll with carried rows still retries sooner")
     }
 
     private static func testBudgetModeQuotesTheBudget() {
