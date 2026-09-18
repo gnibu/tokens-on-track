@@ -149,24 +149,39 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(Array(hiddenProviders), forKey: Keys.hiddenProviders) }
     }
 
-    /// Keep Codex's per-model "spark" buckets off screen. There are two — a short
-    /// session row and a weekly one — and they are toggled separately because
-    /// plenty of users want one and not the other.
-    @Published var hideSparkSession: Bool {
-        didSet { defaults.set(hideSparkSession, forKey: Keys.hideSparkSession) }
+    /// Provider/model pairs whose structured quota rows the user has hidden.
+    /// An absent key means shown, so every newly discovered model appears by
+    /// default without a migration or a hard-coded model list.
+    @Published var hiddenModelLimits: Set<String> {
+        didSet { defaults.set(Array(hiddenModelLimits), forKey: Keys.hiddenModelLimits) }
     }
 
-    @Published var hideSparkWeek: Bool {
-        didSet { defaults.set(hideSparkWeek, forKey: Keys.hideSparkWeek) }
-    }
-
-    /// What the reading surfaces consult when filtering spark rows.
-    var hiddenSpark: HiddenSpark {
-        HiddenSpark(session: hideSparkSession, weekly: hideSparkWeek)
+    /// Every provider/model pair ever observed. This is intentionally
+    /// append-only: APIs may omit an inactive bucket from one response, but its
+    /// visibility control must remain available in Settings.
+    @Published private(set) var knownModelLimits: [ScopedModelLimit] {
+        didSet {
+            if let encoded = try? JSONEncoder().encode(knownModelLimits) {
+                defaults.set(encoded, forKey: Keys.knownModelLimits)
+            }
+        }
     }
 
     func setProvider(_ name: String, hidden: Bool) {
         if hidden { hiddenProviders.insert(name) } else { hiddenProviders.remove(name) }
+    }
+
+    func setModelLimit(provider: String, model: String, hidden: Bool) {
+        let key = ScopedModelLimit.key(provider: provider, model: model)
+        if hidden { hiddenModelLimits.insert(key) } else { hiddenModelLimits.remove(key) }
+    }
+
+    func rememberModelLimits(_ discovered: [ScopedModelLimit]) {
+        let merged = ModelLimitHistory.merging(
+            existing: knownModelLimits,
+            discovered: discovered
+        )
+        if merged != knownModelLimits { knownModelLimits = merged }
     }
 
     private enum Keys {
@@ -192,6 +207,12 @@ final class Preferences: ObservableObject {
         static let openRouterMonthlyBudget = "openRouterMonthlyBudget"
         static let showOpenRouterCosts = "showOpenRouterCosts"
         static let hiddenProviders = "hiddenProviders"
+        static let hiddenModelLimits = "hiddenModelLimits"
+        static let knownModelLimits = "knownModelLimits"
+        static let migratedCodexModelLimits = "migratedCodexModelLimits"
+        static let migratedKnownModelLimits = "migratedKnownModelLimits"
+        /// Legacy Spark row switches. Read once into the generic per-model
+        /// preference, then removed.
         static let hideSparkSession = "hideSparkSession"
         static let hideSparkWeek = "hideSparkWeek"
         /// The single spark switch this replaced. Read once to migrate, then
@@ -225,8 +246,6 @@ final class Preferences: ObservableObject {
             Keys.paceAlerts: true,
             Keys.refreshMinutes: 10.0,
             Keys.showOpenRouterCosts: false,
-            Keys.hideSparkSession: true,
-            Keys.hideSparkWeek: true,
         ])
         showLogoInMenuBar = defaults.bool(forKey: Keys.showLogo)
         showGaugeInMenuBar = defaults.bool(forKey: Keys.showGauge)
@@ -260,18 +279,63 @@ final class Preferences: ObservableObject {
         }
         showOpenRouterCosts = defaults.bool(forKey: Keys.showOpenRouterCosts)
         hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
+        var hiddenModels = Set(defaults.stringArray(forKey: Keys.hiddenModelLimits) ?? [])
+        var knownModels = defaults.data(forKey: Keys.knownModelLimits)
+            .flatMap { try? JSONDecoder().decode([ScopedModelLimit].self, from: $0) } ?? []
+        knownModels = ModelLimitHistory.merging(existing: knownModels, discovered: [])
 
-        // Anyone who had the old all-or-nothing spark switch on expects every
-        // spark row still hidden, so seed both halves from it once.
-        if defaults.object(forKey: Keys.legacyHideCodexSpark) != nil {
-            if defaults.bool(forKey: Keys.legacyHideCodexSpark) {
-                defaults.set(true, forKey: Keys.hideSparkSession)
-                defaults.set(true, forKey: Keys.hideSparkWeek)
-            }
+        if !defaults.bool(forKey: Keys.migratedCodexModelLimits) {
+            let domainName = Bundle.main.bundleIdentifier ?? "io.github.ai-usage"
+            let persisted = defaults.persistentDomain(forName: domainName) ?? [:]
+            let legacySession = persisted[Keys.hideSparkSession] as? Bool
+            let legacyWeek = persisted[Keys.hideSparkWeek] as? Bool
+            let legacyAll = persisted[Keys.legacyHideCodexSpark] as? Bool
+            let hadPreviousReading = Self.cacheFileExists()
+                || legacySession != nil || legacyWeek != nil || legacyAll != nil
+            hiddenModels = ModelLimitMigration.codexSparkVisibility(
+                existing: hiddenModels,
+                hadPreviousReading: hadPreviousReading,
+                legacySessionHidden: legacySession,
+                legacyWeekHidden: legacyWeek,
+                legacyAllHidden: legacyAll
+            )
+            defaults.set(Array(hiddenModels), forKey: Keys.hiddenModelLimits)
+            defaults.set(true, forKey: Keys.migratedCodexModelLimits)
+            defaults.removeObject(forKey: Keys.hideSparkSession)
+            defaults.removeObject(forKey: Keys.hideSparkWeek)
             defaults.removeObject(forKey: Keys.legacyHideCodexSpark)
         }
-        hideSparkSession = defaults.bool(forKey: Keys.hideSparkSession)
-        hideSparkWeek = defaults.bool(forKey: Keys.hideSparkWeek)
+        hiddenModelLimits = hiddenModels
+
+        if !defaults.bool(forKey: Keys.migratedKnownModelLimits) {
+            let sparkKey = ScopedModelLimit.key(
+                provider: "Codex",
+                model: ModelLimitMigration.codexSpark
+            )
+            let existingInstall = Self.cacheFileExists() || hiddenModels.contains(sparkKey)
+            knownModels = ModelLimitHistory.seedingSpark(
+                existing: knownModels,
+                hadPreviousReading: existingInstall
+            )
+            defaults.set(true, forKey: Keys.migratedKnownModelLimits)
+        }
+        knownModelLimits = knownModels
+        if let encoded = try? JSONEncoder().encode(knownModels) {
+            defaults.set(encoded, forKey: Keys.knownModelLimits)
+        }
+    }
+
+    private static func cacheFileExists() -> Bool {
+        let environment = ProcessInfo.processInfo.environment
+        let directory: URL
+        if let override = environment["AI_USAGE_DIR"], !override.isEmpty {
+            directory = URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        } else {
+            directory = URL(fileURLWithPath: ("~/.local/share/ai-usage" as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("usage.json").path
+        )
     }
 
     /// The last selected weekday cannot be removed: an enabled empty schedule

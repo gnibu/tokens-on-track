@@ -20,14 +20,13 @@ struct RowMetrics {
     let glows: Bool
 
     static let card = RowMetrics(
-        label: 84, percent: 46, reset: 88, trackHeight: 10, gap: 12,
+        label: 112, percent: 46, reset: 88, trackHeight: 10, gap: 12,
         labelSize: 14, percentSize: 14, resetSize: 12, markSize: 16, glows: true
     )
 
-    // The label column is wide enough for "spark week", which is the longest
-    // one any provider reports — at 66pt it came out as "spark w…".
+    // Leave room for a scoped model label such as "week (Fable)".
     static let menu = RowMetrics(
-        label: 78, percent: 38, reset: 70, trackHeight: 8, gap: 10,
+        label: 112, percent: 38, reset: 70, trackHeight: 8, gap: 10,
         labelSize: 12, percentSize: 12, resetSize: 11, markSize: 14, glows: false
     )
 }
@@ -45,7 +44,7 @@ struct DesktopUsageCard: View {
         let timing = timing ?? Pace.Timing(schedule: preferences.workSchedule)
         let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
-            hidingSpark: preferences.hiddenSpark
+            hidingModels: preferences.hiddenModelLimits
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
@@ -153,7 +152,7 @@ struct MenuUsageView: View {
         let timing = Pace.Timing(schedule: preferences.workSchedule)
         let display = store.report?.displaying(
             hiding: preferences.hiddenProviders,
-            hidingSpark: preferences.hiddenSpark
+            hidingModels: preferences.hiddenModelLimits
         )
         let verdict = Pace.verdict(display, mode: preferences.percentMode, timing: timing)
         let shown = display?.providers ?? []
@@ -430,6 +429,9 @@ struct UsageRow: View {
                     Text(window.label)
                         .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
                         .foregroundStyle(Glass.ink(isWorst ? 0.95 : 0.6))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .allowsTightening(true)
                     if let cost {
                         Text(cost)
                             .font(.system(size: max(8, metrics.labelSize - 4)))

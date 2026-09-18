@@ -12,16 +12,12 @@ struct UsageWindow: Codable, Identifiable, Equatable {
     /// remain the common currency used by ranking and pacing.
     var spentUSD: Double?
     var budgetUSD: Double?
+    /// Display name supplied by a provider when this quota applies to one
+    /// model. Kept separately from `label` so preferences never have to parse
+    /// user-facing text to hide the row.
+    var model: String?
 
-    var id: String { label }
-
-    /// True for a per-model "spark" bucket, which Codex bills apart from its
-    /// main quota and some users never touch.
-    var isSpark: Bool { label.lowercased().hasPrefix("spark") }
-
-    /// Spark arrives as a short session row and a longer weekly one. Anything a
-    /// week or longer counts as the weekly row, matching how the fetcher labels.
-    var isSparkWeek: Bool { (windowSeconds ?? 0) >= 7 * 86_400 }
+    var id: String { model.map { $0 + "\u{1}" + label } ?? label }
 
     enum CodingKeys: String, CodingKey {
         case label
@@ -30,6 +26,7 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         case windowSeconds = "window_seconds"
         case spentUSD = "spent_usd"
         case budgetUSD = "budget_usd"
+        case model
     }
 
     init(
@@ -38,7 +35,8 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         resetsAt: Int? = nil,
         windowSeconds: Int? = nil,
         spentUSD: Double? = nil,
-        budgetUSD: Double? = nil
+        budgetUSD: Double? = nil,
+        model: String? = nil
     ) {
         self.label = label
         self.percent = percent
@@ -46,6 +44,7 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         self.windowSeconds = windowSeconds
         self.spentUSD = spentUSD
         self.budgetUSD = budgetUSD
+        self.model = model
     }
 
     init(from decoder: Decoder) throws {
@@ -56,23 +55,83 @@ struct UsageWindow: Codable, Identifiable, Equatable {
         windowSeconds = try? box.decodeIfPresent(Int.self, forKey: .windowSeconds)
         spentUSD = try? box.decodeIfPresent(Double.self, forKey: .spentUSD)
         budgetUSD = try? box.decodeIfPresent(Double.self, forKey: .budgetUSD)
+        model = try? box.decodeIfPresent(String.self, forKey: .model)
     }
 }
 
-/// Which of Codex's per-model "spark" buckets the user has chosen to keep off
-/// every surface. Spark reports a short session row and a weekly one; they are
-/// toggled separately because plenty of people want one and not the other.
-struct HiddenSpark: Equatable {
-    var session = false
-    var weekly = false
+/// One provider/model pair discovered in a structured quota response. Its
+/// normalized key is persisted; the original names remain available to the UI.
+struct ScopedModelLimit: Codable, Identifiable, Equatable {
+    let provider: String
+    let model: String
 
-    static let none = HiddenSpark()
+    var id: String { Self.key(provider: provider, model: model) }
+    var displayName: String { Self.displayName(for: model) }
 
-    var isEmpty: Bool { !session && !weekly }
+    static func key(provider: String, model: String) -> String {
+        let providerPart = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let modelPart = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return providerPart + "\u{1}" + modelPart
+    }
 
-    /// True when this spark bucket should be dropped.
-    func hides(_ window: UsageWindow) -> Bool {
-        window.isSparkWeek ? weekly : session
+    static func displayName(for model: String) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.split(separator: "-").last.map(String.init) ?? trimmed
+    }
+}
+
+/// Durable catalog of model-specific limits seen on this Mac. Provider
+/// responses may omit an inactive model on any given refresh, so discovery is
+/// append-only and independent from whether that model is currently visible.
+enum ModelLimitHistory {
+    static func merging(
+        existing: [ScopedModelLimit],
+        discovered: [ScopedModelLimit]
+    ) -> [ScopedModelLimit] {
+        var result: [ScopedModelLimit] = []
+        var seen = Set<String>()
+        for limit in existing + discovered where seen.insert(limit.id).inserted {
+            result.append(limit)
+        }
+        return result
+    }
+
+    static func seedingSpark(
+        existing: [ScopedModelLimit],
+        hadPreviousReading: Bool
+    ) -> [ScopedModelLimit] {
+        guard hadPreviousReading else { return existing }
+        return merging(
+            existing: existing,
+            discovered: [
+                ScopedModelLimit(provider: "Codex", model: ModelLimitMigration.codexSpark),
+            ]
+        )
+    }
+}
+
+/// One-time bridge from the two Spark row switches shipped before all model
+/// limits shared one setting. Only a fully hidden old model remains hidden;
+/// a mixed state becomes shown because one model-level switch cannot express it.
+enum ModelLimitMigration {
+    static let codexSpark = "GPT-5.3-Codex-Spark"
+
+    static func codexSparkVisibility(
+        existing: Set<String>,
+        hadPreviousReading: Bool,
+        legacySessionHidden: Bool?,
+        legacyWeekHidden: Bool?,
+        legacyAllHidden: Bool?
+    ) -> Set<String> {
+        var result = existing
+        let key = ScopedModelLimit.key(provider: "Codex", model: codexSpark)
+        guard hadPreviousReading, !result.contains(key) else { return result }
+
+        let bothRowsHidden = (legacySessionHidden ?? true) && (legacyWeekHidden ?? true)
+        if legacyAllHidden == true || (legacyAllHidden == nil && bothRowsHidden) {
+            result.insert(key)
+        }
+        return result
     }
 }
 
@@ -251,34 +310,39 @@ struct Report: Codable, Equatable {
     }
 
     /// What the reading surfaces actually draw: set-up providers, minus any the
-    /// user has hidden, with any unwanted Codex "spark" model buckets dropped.
+    /// user has hidden, with any unwanted model-specific buckets dropped.
     /// One filter for the card, the dropdown, the menu bar and the alerts, so a
     /// hidden provider is hidden everywhere at once.
     func displayProviders(
         hiding hiddenNames: Set<String> = [],
-        hidingSpark hiddenSpark: HiddenSpark = .none
+        hidingModels hiddenModels: Set<String> = []
     ) -> [Provider] {
         visibleProviders.compactMap { provider in
             guard !hiddenNames.contains(provider.name) else { return nil }
-            guard !hiddenSpark.isEmpty else { return provider }
+            guard !hiddenModels.isEmpty else { return provider }
             var trimmed = provider
             trimmed.windows = provider.windows.filter {
-                !($0.isSpark && hiddenSpark.hides($0))
+                guard let model = $0.model else { return true }
+                let key = ScopedModelLimit.key(provider: provider.name, model: model)
+                return !hiddenModels.contains(key)
             }
             return trimmed
         }
     }
 
     /// The report as the reading surfaces see it, with hidden providers and
-    /// spark rows already removed. Everything that ranks or summarises windows —
+    /// model rows already removed. Everything that ranks or summarises windows —
     /// the header verdict, the card's hot glow, the menu bar — runs off this, so
     /// none of them can speak for a row that is not drawn.
     func displaying(
         hiding hiddenNames: Set<String> = [],
-        hidingSpark hiddenSpark: HiddenSpark = .none
+        hidingModels hiddenModels: Set<String> = []
     ) -> Report {
         var copy = self
-        copy.providers = displayProviders(hiding: hiddenNames, hidingSpark: hiddenSpark)
+        copy.providers = displayProviders(
+            hiding: hiddenNames,
+            hidingModels: hiddenModels
+        )
         return copy
     }
 
@@ -324,15 +388,22 @@ struct Report: Codable, Equatable {
         return copy
     }
 
-    /// True when any provider reports a short spark bucket, so the settings pane
-    /// can offer to hide it only when there is one to hide.
-    var hasSparkSession: Bool {
-        providers.contains { $0.windows.contains { $0.isSpark && !$0.isSparkWeek } }
-    }
-
-    /// True when any provider reports a weekly spark bucket.
-    var hasSparkWeekly: Bool {
-        providers.contains { $0.windows.contains { $0.isSpark && $0.isSparkWeek } }
+    /// Model-specific quota switches currently worth offering in Settings.
+    /// Preserve provider/window order and collapse several windows for one
+    /// model into a single switch.
+    var scopedModelLimits: [ScopedModelLimit] {
+        var seen = Set<String>()
+        var result: [ScopedModelLimit] = []
+        for provider in providers {
+            for window in provider.windows {
+                guard let model = window.model?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !model.isEmpty
+                else { continue }
+                let limit = ScopedModelLimit(provider: provider.name, model: model)
+                if seen.insert(limit.id).inserted { result.append(limit) }
+            }
+        }
+        return result
     }
 
     /// A reading older than this is shown as stale rather than silently trusted.
@@ -408,7 +479,7 @@ struct Report: Codable, Equatable {
     /// Provider and window labels are each unique within a reading, but only
     /// together do they identify one row.
     static func rowKey(provider: Provider, window: UsageWindow) -> String {
-        provider.name + "\u{1}" + window.label
+        provider.name + "\u{1}" + window.id
     }
 
     private static func key(_ pair: (provider: Provider, window: UsageWindow)) -> String {

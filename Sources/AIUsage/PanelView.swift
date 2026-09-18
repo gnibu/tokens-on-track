@@ -428,12 +428,16 @@ private struct SettingsTab: View {
         preferences.openRouterMonthlyBudget = budget
     }
 
-    /// Show/hide each set-up provider, and Codex's spark rows. Only the
+    /// Show/hide each set-up provider and its model-specific rows. Only the
     /// providers we actually have credentials for get a switch — there is no
     /// sense offering to hide one that was never installed.
     @ViewBuilder
     private var providersGroup: some View {
         let known = (store.report?.providers ?? []).filter(\.loggedIn)
+        let knownProviders = Set(known.map(\.name))
+        let scopedModels = preferences.knownModelLimits.filter {
+            knownProviders.contains($0.provider)
+        }
 
         if !known.isEmpty {
             Group {
@@ -452,30 +456,19 @@ private struct SettingsTab: View {
                         }
                     }
 
-                    if store.report?.hasSparkSession == true {
+                    ForEach(scopedModels) { model in
                         SettingRow(
-                            title: "Show Codex Spark 5h",
-                            subtitle: "the per-model session row"
+                            title: "Show \(model.provider) \(model.displayName) limits",
+                            subtitle: "the model-specific usage rows"
                         ) {
                             GlassSwitch(isOn: Binding(
-                                get: { !preferences.hideSparkSession },
+                                get: { !preferences.hiddenModelLimits.contains(model.id) },
                                 set: { shown in
-                                    preferences.hideSparkSession = !shown
-                                    store.iconPreferenceChanged()
-                                }
-                            ))
-                        }
-                    }
-
-                    if store.report?.hasSparkWeekly == true {
-                        SettingRow(
-                            title: "Show Codex Spark week",
-                            subtitle: "the per-model weekly row"
-                        ) {
-                            GlassSwitch(isOn: Binding(
-                                get: { !preferences.hideSparkWeek },
-                                set: { shown in
-                                    preferences.hideSparkWeek = !shown
+                                    preferences.setModelLimit(
+                                        provider: model.provider,
+                                        model: model.model,
+                                        hidden: !shown
+                                    )
                                     store.iconPreferenceChanged()
                                 }
                             ))

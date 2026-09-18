@@ -9,6 +9,10 @@ generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/
 
 ### Added
 
+- Claude and Codex model-specific quota rows, such as `week (Fable)` and
+  `week (Spark)`, discovered from provider responses. Each discovered model is
+  shown by default, remembered across responses that omit it, and can be hidden
+  across every surface from Settings.
 - A refresh button on the desktop card, and a spinner on both refresh buttons
   while a poll is in flight.
 

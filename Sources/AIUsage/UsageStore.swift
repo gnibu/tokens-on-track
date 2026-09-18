@@ -71,6 +71,7 @@ final class UsageStore: ObservableObject {
         let preferences = Preferences.shared
         workSchedule = preferences.workSchedule
         loadCache()
+        preferences.rememberModelLimits(report?.scopedModelLimits ?? [])
         report = report?.rebudgetingOpenRouter(
             monthlyBudget: preferences.openRouterMonthlyBudget
         )
@@ -155,10 +156,10 @@ final class UsageStore: ObservableObject {
         let timing = timing ?? Pace.Timing(schedule: workSchedule)
         let preferences = Preferences.shared
         // The bar draws from the same filtered set as the card, so hiding a
-        // provider or the spark rows clears them from the menu bar too.
+        // provider or model-specific rows clears them from the menu bar too.
         return report.displaying(
             hiding: preferences.hiddenProviders,
-            hidingSpark: preferences.hiddenSpark
+            hidingModels: preferences.hiddenModelLimits
         ).busiestWindows(
             limit: limit,
             fairShare: preferences.menuBarFairShare,
@@ -218,6 +219,7 @@ final class UsageStore: ObservableObject {
             openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget
         )
         let merged = merging(fetched, full: full, at: Date())
+        Preferences.shared.rememberModelLimits(merged.scopedModelLimits)
         report = merged
         // Remember the expiry of any token just rejected, so the next wake can
         // tell a freshly-minted token apart from the same stale one.

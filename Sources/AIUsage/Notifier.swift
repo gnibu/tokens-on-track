@@ -38,15 +38,17 @@ enum Notifier {
 
         // Carried-over numbers were already judged when they were fresh; a
         // stale provider must not be able to raise an alert twice. Hidden
-        // providers and spark rows are left out here too, so nothing off-screen
-        // can raise an alert.
+        // providers and model-specific rows are left out here too, so nothing
+        // off-screen can raise an alert.
         let watched = report.displayProviders(
             hiding: preferences.hiddenProviders,
-            hidingSpark: preferences.hiddenSpark
+            hidingModels: preferences.hiddenModelLimits
         )
         for provider in watched where provider.ok && !provider.stale {
             for window in provider.windows {
-                let key = "\(provider.name)/\(window.label)"
+                // Keep providers' full structured model names in alert
+                // identity even when two compact labels happen to match.
+                let key = "\(provider.name)/\(window.id)"
                 var mark = marks[key] ?? Mark(resetsAt: window.resetsAt)
 
                 // A new reset instant means a new window: forget what we said.
