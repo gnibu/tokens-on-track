@@ -38,6 +38,7 @@ enum RegressionTests {
         testJWTExpiryIsParsed()
         testStaleTokenSurvivesTheCarry()
         testCarryRemembersConductorSource()
+        testLostConductorKeyPointsToSettings()
         testBudgetModeQuotesTheBudget()
         testTargetModeQuotesThePaceIndex()
         testTargetModeSaysNothingWhileTheWindowIsYoung()
@@ -596,6 +597,18 @@ enum RegressionTests {
         check(
             carried.providers[0].credentialSource == .conductor,
             "the carried reading must remember the Conductor source"
+        )
+    }
+
+    private static func testLostConductorKeyPointsToSettings() {
+        var provider = Provider(name: "OpenRouter")
+        provider.error = OpenRouterBudget.notConnectedMessage
+        provider.credentialSource = .conductor
+
+        check(
+            OpenRouterCredential.reconnectMessage(for: provider)
+                == "no live key — add one in Settings to reconnect",
+            "a lost transient key must point to the reliable manual-key control"
         )
     }
 
