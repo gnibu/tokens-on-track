@@ -73,6 +73,7 @@ enum Fetcher {
             ])
         } catch let error as HTTPStatus {
             provider.error = note(for: error.code, refreshWith: "claude")
+            provider.staleToken = error.code == 401
             return provider
         } catch {
             provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
@@ -126,6 +127,7 @@ enum Fetcher {
             data = try await getJSONRetrying(codexUsageURL, headers: headers)
         } catch let error as HTTPStatus {
             provider.error = note(for: error.code, refreshWith: "codex")
+            provider.staleToken = error.code == 401
             return provider
         } catch {
             provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
@@ -174,7 +176,7 @@ enum Fetcher {
         var provider = Provider(name: "OpenRouter")
         let candidates = openRouterCandidates()
         guard !candidates.isEmpty else {
-            provider.error = "not connected"
+            provider.error = OpenRouterBudget.notConnectedMessage
             return provider
         }
         provider.loggedIn = true
@@ -294,6 +296,47 @@ enum Fetcher {
 
     struct HTTPStatus: Error {
         let code: Int
+    }
+
+    /// When a provider's already-stored token expires, read from the local
+    /// credential without a network call. Nil for a provider whose credential
+    /// is a plain key with no expiry (OpenRouter) or cannot be read.
+    ///
+    /// The store uses this, not the API, to decide when a token-rejected
+    /// provider is worth polling again: a 401 lasts until the CLI writes a new
+    /// token, and the only local sign that has happened is the expiry moving.
+    static func localTokenExpiry(_ name: String) -> Double? {
+        switch name {
+        case "Claude":
+            guard let blob = keychainSecret(service: keychainService),
+                  let oauth = json(blob)?["claudeAiOauth"] as? [String: Any],
+                  let ms = (oauth["expiresAt"] as? NSNumber)?.doubleValue
+            else { return nil }
+            return ms / 1000  // stored in milliseconds
+        case "Codex":
+            guard let raw = FileManager.default.contents(atPath: codexAuthPath),
+                  let tokens = json(raw)?["tokens"] as? [String: Any],
+                  let token = tokens["access_token"] as? String
+            else { return nil }
+            return jwtExpiry(token)
+        default:
+            return nil
+        }
+    }
+
+    /// The `exp` claim (epoch seconds) from a JWT's payload, read without
+    /// verifying the signature — enough to see whether the token has expired.
+    static func jwtExpiry(_ token: String) -> Double? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload.append("=") }
+        guard let data = Data(base64Encoded: payload),
+              let exp = (json(data)?["exp"] as? NSNumber)?.doubleValue
+        else { return nil }
+        return exp
     }
 
     /// What to tell the reader about a failed poll.

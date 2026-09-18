@@ -35,6 +35,9 @@ enum RegressionTests {
         testCarriedWindowIsDroppedOnceItHasReset()
         testHasNoReadingOnlyWhenAPollLandedNothing()
         testOfflinePollAsksAgainSooner()
+        testJWTExpiryIsParsed()
+        testStaleTokenSurvivesTheCarry()
+        testCarryRemembersConductorSource()
         testBudgetModeQuotesTheBudget()
         testTargetModeQuotesThePaceIndex()
         testTargetModeSaysNothingWhileTheWindowIsYoung()
@@ -573,6 +576,62 @@ enum RegressionTests {
         unbudgeted.windows = [window(percent: 5, elapsedPercent: 10)]
         let budgetless = Report(providers: [unbudgeted], date: now)
         check(!budgetless.hasNoReading, "awaiting a budget is setup, not a retry")
+    }
+
+    private static func testCarryRemembersConductorSource() {
+        // A Conductor-discovered key is visible only while an OpenCode session
+        // runs, so it vanishes between polls. The carried reading must remember
+        // it came from Conductor, so the surface can point back there rather
+        // than showing a bare "not connected".
+        var good = provider(name: "OpenRouter", windows: [window(percent: 20, elapsedPercent: 50)])
+        good.credentialSource = .conductor
+        let previous = Report(providers: [good], date: now)
+
+        var lost = Provider(name: "OpenRouter")
+        lost.error = OpenRouterBudget.notConnectedMessage
+        let later = now.addingTimeInterval(300)
+        let carried = Report(providers: [lost], date: later).carryingOver(from: previous, now: later)
+
+        check(carried.providers[0].stale, "the last reading must be carried")
+        check(
+            carried.providers[0].credentialSource == .conductor,
+            "the carried reading must remember the Conductor source"
+        )
+    }
+
+    private static func testJWTExpiryIsParsed() {
+        // Codex's access token is a JWT; its expiry is read locally to tell a
+        // freshly-minted token from the stale one, so the base64url payload
+        // (with -/_ swapped for +// and stripped padding) must decode.
+        let payload = try! JSONSerialization.data(withJSONObject: ["exp": 1_790_233_892])
+        let segment = payload.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        check(
+            Fetcher.jwtExpiry("header.\(segment).signature") == 1_790_233_892,
+            "the exp claim must survive base64url decoding"
+        )
+        check(Fetcher.jwtExpiry("not-a-jwt") == nil, "a non-JWT must yield no expiry")
+        check(Fetcher.jwtExpiry("only.two") == nil, "a malformed JWT must yield no expiry")
+    }
+
+    private static func testStaleTokenSurvivesTheCarry() {
+        // A 401 sets staleToken; carrying the last reading over the failed poll
+        // must keep the flag, so the store stays on the fast token-watch cadence
+        // rather than the user's interval while it waits for the CLI to run.
+        let good = Report(
+            providers: [provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])],
+            date: now
+        )
+        var failed = Provider(name: "Claude")
+        failed.loggedIn = true
+        failed.error = "stored token went stale — run claude once"
+        failed.staleToken = true
+        let later = now.addingTimeInterval(300)
+        let carried = Report(providers: [failed], date: later).carryingOver(from: good, now: later)
+        check(carried.providers[0].ok, "the last reading must still show")
+        check(carried.providers[0].staleToken, "the stale-token flag must survive the carry")
     }
 
     private static func testOfflinePollAsksAgainSooner() {

@@ -359,11 +359,20 @@ private struct SettingsTab: View {
         store.report?.providers.first(where: { $0.name == "OpenRouter" })
     }
 
-    private var openRouterConnectionLabel: String {
+    /// A remembered credential source outlives the key it names — the carry
+    /// keeps it so the card can point back to Conductor. So "we have a source"
+    /// is not "we are connected": a live "not connected" means the credential is
+    /// gone now, whatever produced the last reading.
+    private var isOpenRouterConnected: Bool {
         guard let provider = openRouterProvider, provider.credentialSource != nil else {
-            return "Not connected"
+            return false
         }
-        if provider.error?.contains("rejected") == true { return "Rejected" }
+        return provider.error != OpenRouterBudget.notConnectedMessage
+    }
+
+    private var openRouterConnectionLabel: String {
+        guard isOpenRouterConnected else { return "Not connected" }
+        if openRouterProvider?.error?.contains("rejected") == true { return "Rejected" }
         return "Connected"
     }
 
@@ -378,10 +387,8 @@ private struct SettingsTab: View {
     }
 
     private var openRouterConnectionColor: Color {
-        guard let provider = openRouterProvider, provider.credentialSource != nil else {
-            return Color.white.opacity(0.3)
-        }
-        return provider.error?.contains("rejected") == true ? Pace.warn : Pace.good
+        guard isOpenRouterConnected else { return Color.white.opacity(0.3) }
+        return openRouterProvider?.error?.contains("rejected") == true ? Pace.warn : Pace.good
     }
 
     private func saveOpenRouterKey() {
