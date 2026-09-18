@@ -17,6 +17,7 @@ enum RegressionTests {
         testClaudeMalformedLimitsAreSkipped()
         testCodexAdditionalLimitsAreParsedGenerically()
         testCodexMalformedAdditionalLimitsAreSkipped()
+        testProviderSpecificModelDisplayNames()
         testCodexSparkPreferencesMigrateToModelVisibility()
         testModelLimitHistoryRemembersPastModels()
         testModelLimitHistorySeedsSparkForExistingInstalls()
@@ -247,6 +248,18 @@ enum RegressionTests {
         check(
             Fetcher.codexAdditionalWindows(additional).isEmpty,
             "unnamed or malformed Codex additional limits must be skipped"
+        )
+    }
+
+    private static func testProviderSpecificModelDisplayNames() {
+        check(
+            ScopedModelLimit(provider: "Codex", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
+            "Codex limit names must retain their compact final segment"
+        )
+        check(
+            ScopedModelLimit(provider: "Claude", model: "claude-fable-5-1").displayName
+                == "claude-fable-5-1",
+            "a Claude raw model ID must match the name shown in its usage row"
         )
     }
 

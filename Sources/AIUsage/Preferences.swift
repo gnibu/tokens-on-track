@@ -326,16 +326,7 @@ final class Preferences: ObservableObject {
     }
 
     private static func cacheFileExists() -> Bool {
-        let environment = ProcessInfo.processInfo.environment
-        let directory: URL
-        if let override = environment["AI_USAGE_DIR"], !override.isEmpty {
-            directory = URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
-        } else {
-            directory = URL(fileURLWithPath: ("~/.local/share/ai-usage" as NSString).expandingTildeInPath)
-        }
-        return FileManager.default.fileExists(
-            atPath: directory.appendingPathComponent("usage.json").path
-        )
+        FileManager.default.fileExists(atPath: UsageStore.cacheURL.path)
     }
 
     /// The last selected weekday cannot be removed: an enabled empty schedule

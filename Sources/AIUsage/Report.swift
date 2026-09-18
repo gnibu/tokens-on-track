@@ -66,7 +66,7 @@ struct ScopedModelLimit: Codable, Identifiable, Equatable {
     let model: String
 
     var id: String { Self.key(provider: provider, model: model) }
-    var displayName: String { Self.displayName(for: model) }
+    var displayName: String { Self.displayName(provider: provider, model: model) }
 
     static func key(provider: String, model: String) -> String {
         let providerPart = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -74,8 +74,11 @@ struct ScopedModelLimit: Codable, Identifiable, Equatable {
         return providerPart + "\u{1}" + modelPart
     }
 
-    static func displayName(for model: String) -> String {
+    static func displayName(provider: String, model: String) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard provider.caseInsensitiveCompare("Codex") == .orderedSame else {
+            return trimmed
+        }
         return trimmed.split(separator: "-").last.map(String.init) ?? trimmed
     }
 }

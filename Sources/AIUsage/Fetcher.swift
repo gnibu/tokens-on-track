@@ -242,7 +242,7 @@ enum Fetcher {
             let length = (block["limit_window_seconds"] as? NSNumber)?.intValue
             let baseLabel = windowLabel(length)
             let label = model.map {
-                "\(baseLabel) (\(ScopedModelLimit.displayName(for: $0)))"
+                "\(baseLabel) (\(ScopedModelLimit.displayName(provider: "Codex", model: $0)))"
             } ?? baseLabel
             out.append(UsageWindow(
                 label: label,
