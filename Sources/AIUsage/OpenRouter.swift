@@ -126,6 +126,14 @@ enum OpenRouterCredential {
     static let openCodeAuthPath = ("~/.local/share/opencode/auth.json" as NSString)
         .expandingTildeInPath
 
+    static func reconnectMessage(for provider: Provider) -> String? {
+        guard provider.name == "OpenRouter",
+              provider.error == OpenRouterBudget.notConnectedMessage,
+              provider.credentialSource == .conductor
+        else { return nil }
+        return "no live key — add one in Settings to reconnect"
+    }
+
     static func key(inOpenCodeAuth data: Data) -> String? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let credential = root["openrouter"] as? [String: Any],

@@ -262,7 +262,7 @@ private struct SettingsTab: View {
                     title: "API key",
                     subtitle: openRouterKeyError ?? (store.hasSavedOpenRouterKey
                         ? "saved in this Mac's Keychain"
-                        : "automatic when OpenCode or Conductor exposes one")
+                        : "add a key for reliable tracking")
                 ) {
                     if editingOpenRouterKey {
                         VStack(alignment: .trailing, spacing: 6) {
@@ -377,13 +377,13 @@ private struct SettingsTab: View {
     }
 
     private var openRouterConnectionSubtitle: String {
-        guard let provider = openRouterProvider else { return "No OpenRouter credential found" }
+        guard let provider = openRouterProvider else { return "Add an OpenRouter API key below" }
         var parts: [String] = []
         if let source = provider.credentialSource { parts.append(source.rawValue) }
         if let error = provider.error, error != OpenRouterBudget.missingBudgetMessage {
             parts.append(error)
         }
-        return parts.isEmpty ? "No OpenRouter credential found" : parts.joined(separator: " · ")
+        return parts.isEmpty ? "Add an OpenRouter API key below" : parts.joined(separator: " · ")
     }
 
     private var openRouterConnectionColor: Color {

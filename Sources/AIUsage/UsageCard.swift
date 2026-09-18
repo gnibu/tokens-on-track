@@ -262,15 +262,10 @@ struct OutageNotice: View {
         return "\(provider.name): \(reason) · rows from \(Pace.clockLabel(measured))"
     }
 
-    /// What went wrong, in the reader's terms. "not connected" is generic, but
-    /// when the last key we did find was a Conductor one — discoverable only
-    /// while an OpenCode session runs — we can name the way back to a reading.
+    /// What went wrong, in the reader's terms. A vanished transient Conductor
+    /// key gets an actionable route to the reliable credential field.
     private static func outageReason(_ provider: Provider) -> String {
-        if provider.name == "OpenRouter",
-           provider.error == OpenRouterBudget.notConnectedMessage,
-           provider.credentialSource == .conductor {
-            return "no live key — run an OpenRouter task in Conductor to refresh"
-        }
+        if let reconnect = OpenRouterCredential.reconnectMessage(for: provider) { return reconnect }
         return provider.error ?? "no reading"
     }
 }

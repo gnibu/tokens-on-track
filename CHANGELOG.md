@@ -24,6 +24,8 @@ generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/
   minute on its own, while the providers that answer keep the configured
   interval instead of being asked alongside it. A rejected token or key keeps
   the normal interval.
+- OpenRouter connection guidance now points to the manual Keychain-backed API
+  key field instead of promising that another Conductor task will reconnect it.
 
 ## [1.1.0] - 2026-09-16
 
