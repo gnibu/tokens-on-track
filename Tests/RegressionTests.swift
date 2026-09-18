@@ -35,6 +35,8 @@ enum RegressionTests {
         testCarriedWindowIsDroppedOnceItHasReset()
         testHasNoReadingOnlyWhenAPollLandedNothing()
         testOfflinePollAsksAgainSooner()
+        testJWTExpiryIsParsed()
+        testStaleTokenSurvivesTheCarry()
         testBudgetModeQuotesTheBudget()
         testTargetModeQuotesThePaceIndex()
         testTargetModeSaysNothingWhileTheWindowIsYoung()
@@ -573,6 +575,41 @@ enum RegressionTests {
         unbudgeted.windows = [window(percent: 5, elapsedPercent: 10)]
         let budgetless = Report(providers: [unbudgeted], date: now)
         check(!budgetless.hasNoReading, "awaiting a budget is setup, not a retry")
+    }
+
+    private static func testJWTExpiryIsParsed() {
+        // Codex's access token is a JWT; its expiry is read locally to tell a
+        // freshly-minted token from the stale one, so the base64url payload
+        // (with -/_ swapped for +// and stripped padding) must decode.
+        let payload = try! JSONSerialization.data(withJSONObject: ["exp": 1_790_233_892])
+        let segment = payload.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        check(
+            Fetcher.jwtExpiry("header.\(segment).signature") == 1_790_233_892,
+            "the exp claim must survive base64url decoding"
+        )
+        check(Fetcher.jwtExpiry("not-a-jwt") == nil, "a non-JWT must yield no expiry")
+        check(Fetcher.jwtExpiry("only.two") == nil, "a malformed JWT must yield no expiry")
+    }
+
+    private static func testStaleTokenSurvivesTheCarry() {
+        // A 401 sets staleToken; carrying the last reading over the failed poll
+        // must keep the flag, so the store stays on the fast token-watch cadence
+        // rather than the user's interval while it waits for the CLI to run.
+        let good = Report(
+            providers: [provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])],
+            date: now
+        )
+        var failed = Provider(name: "Claude")
+        failed.loggedIn = true
+        failed.error = "stored token went stale — run claude once"
+        failed.staleToken = true
+        let later = now.addingTimeInterval(300)
+        let carried = Report(providers: [failed], date: later).carryingOver(from: good, now: later)
+        check(carried.providers[0].ok, "the last reading must still show")
+        check(carried.providers[0].staleToken, "the stale-token flag must survive the carry")
     }
 
     private static func testOfflinePollAsksAgainSooner() {

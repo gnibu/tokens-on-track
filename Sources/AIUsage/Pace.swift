@@ -458,9 +458,12 @@ enum Pace {
 
     /// Bare wall clock, for saying when a carried-over reading was taken.
     static func clockLabel(_ epoch: Int) -> String {
+        let date = Date(timeIntervalSince1970: Double(epoch))
         let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
-        return clock.string(from: Date(timeIntervalSince1970: Double(epoch)))
+        // A carried reading can now be up to a day old, so a bare HH:mm would be
+        // ambiguous across midnight — name the day once it is not today's.
+        clock.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "EEE HH:mm"
+        return clock.string(from: date)
     }
 
     /// Absolute reset time. Bare clock today, weekday within the week, and a

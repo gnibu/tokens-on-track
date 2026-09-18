@@ -96,6 +96,11 @@ struct Provider: Codable, Identifiable, Equatable {
     /// Only this brings the retry down to a minute; the others cannot be fixed
     /// by asking again, and hammering the endpoint would be rude.
     var unreachable: Bool = false
+    /// True when the last poll was refused with a 401: the stored access token
+    /// has expired and only the CLI writing a new one will fix it. Re-polling
+    /// the API meanwhile just earns another 401, so the store watches the
+    /// token's local expiry and asks again only once a fresh one is minted.
+    var staleToken: Bool = false
     /// Non-secret origin of the credential that produced this reading. It is
     /// shown in Settings and harmless in the cache.
     var credentialSource: OpenRouterCredential.Source?
@@ -112,6 +117,7 @@ struct Provider: Codable, Identifiable, Equatable {
         case measuredAt = "measured_at"
         case loggedIn = "logged_in"
         case unreachable
+        case staleToken = "stale_token"
         case credentialSource = "credential_source"
     }
 
@@ -149,6 +155,7 @@ struct Provider: Codable, Identifiable, Equatable {
         // refresh lands.
         loggedIn = (try? box.decode(Bool.self, forKey: .loggedIn)) ?? ok
         unreachable = (try? box.decode(Bool.self, forKey: .unreachable)) ?? false
+        staleToken = (try? box.decode(Bool.self, forKey: .staleToken)) ?? false
         credentialSource = try? box.decodeIfPresent(OpenRouterCredential.Source.self, forKey: .credentialSource)
     }
 }
@@ -185,9 +192,13 @@ struct Report: Codable, Equatable {
     /// answering — and the previous reading stays the best answer to "am I
     /// fine?" for the few minutes until the next try.
     ///
-    /// Only for a while: past `carryLimit` the quota windows have moved on and
-    /// the old numbers would be a lie rather than an approximation.
-    static let carryLimit: TimeInterval = 3 * 3600
+    /// Only for a while: past `carryLimit` even a window with no reset of its
+    /// own is too old to stand in for a live reading. A day covers the common
+    /// case — Claude's access token going stale overnight — so the last good
+    /// numbers survive until the CLI runs again in the morning. Per-window
+    /// expiry is handled separately below: a window past its reset is dropped
+    /// regardless, so this cap only holds back readings nothing else retired.
+    static let carryLimit: TimeInterval = 24 * 3600
 
     func carryingOver(from previous: Report?, now: Date = Date()) -> Report {
         guard let previous else { return self }

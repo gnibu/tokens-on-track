@@ -56,6 +56,11 @@ final class UsageStore: ObservableObject {
     /// When each provider was last asked. Providers are polled on their own
     /// cadence, so this, not the report's clock, decides who is due.
     private var lastAttempt: [String: Date] = [:]
+    /// The local token expiry each provider was last polled with. A rejected
+    /// token stays rejected until the CLI mints a new one, which shows up here
+    /// as a changed expiry — the cue to poll again. Only tracked for providers
+    /// whose token was rejected, so a healthy poll reads no extra credentials.
+    private var polledTokenExpiry: [String: Double?] = [:]
     private var refreshTimer: Timer?
     private var scheduleBoundaryTimer: Timer?
     private var workSchedule = WorkSchedule.disabled
@@ -171,7 +176,19 @@ final class UsageStore: ObservableObject {
     /// so an unreachable one is retried every minute while the rest keep the
     /// user's interval and are not hammered alongside it.
     private func refreshDue() async {
-        let due = dueNames(at: Date())
+        let now = Date()
+        var due = dueNames(at: now)
+        // A provider whose token was rejected will 401 again until the CLI
+        // writes a fresh one. Rather than re-poll blind, watch the token's local
+        // expiry and ask again only when it moves — the sign a new token landed.
+        // Until then the minute wake is a local read, not an API call.
+        due.removeAll { name in
+            guard staleToken(name),
+                  Fetcher.localTokenExpiry(name) == polledTokenExpiry[name] ?? nil
+            else { return false }
+            lastAttempt[name] = now  // attended: recheck in a minute, don't spin
+            return true
+        }
         guard !due.isEmpty else {
             scheduleTimer()
             return
@@ -198,6 +215,11 @@ final class UsageStore: ObservableObject {
         )
         let merged = merging(fetched, full: full, at: Date())
         report = merged
+        // Remember the expiry of any token just rejected, so the next wake can
+        // tell a freshly-minted token apart from the same stale one.
+        for provider in merged.providers where provider.staleToken {
+            polledTokenExpiry[provider.name] = Fetcher.localTokenExpiry(provider.name)
+        }
         write(merged)
         redrawIcon()
         scheduleTimer()
@@ -260,13 +282,17 @@ final class UsageStore: ObservableObject {
 
     // ----------------------------------------------------------------- //
 
-    /// Each provider's own cadence: a minute while it is unreachable, the
-    /// user's interval otherwise.
+    /// Each provider's own cadence: a minute while it is unreachable or waiting
+    /// on a fresh token, the user's interval otherwise. The stale-token minute
+    /// is spent reading the token locally, not the API — see `refreshDue`.
     private func cadence(for name: String, configured: TimeInterval) -> TimeInterval {
         let provider = report?.providers.first { $0.name == name }
-        return provider?.unreachable == true
-            ? min(configured, Self.offlineRetryInterval)
-            : configured
+        let fast = provider?.unreachable == true || provider?.staleToken == true
+        return fast ? min(configured, Self.offlineRetryInterval) : configured
+    }
+
+    private func staleToken(_ name: String) -> Bool {
+        report?.providers.first { $0.name == name }?.staleToken ?? false
     }
 
     private func dueNames(at now: Date) -> [String] {
