@@ -4,9 +4,16 @@
 #
 #   ./build.sh              build into .build/Tokens on Track.app
 #   ./build.sh --install    also copy it to /Applications and launch it
+#
+# Signs with Developer ID when .env or the keychain supplies exactly one
+# "Developer ID Application" certificate (same identity as release.py).
+# Otherwise, or if that sign step fails, falls back to ad-hoc.
 set -eu
 
 cd "$(dirname "$0")"
+
+# shellcheck disable=SC1091
+[ -f .env ] && . ./.env
 
 APP_NAME="Tokens on Track"
 LEGACY_APP_NAME="AI Usage"
@@ -31,10 +38,39 @@ cp Resources/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
 cp -R Resources/Icons "$BUNDLE/Contents/Resources/Icons"
 printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
 
-# Ad-hoc signature. Without one, macOS refuses to hand the app a notification
-# token and the login item registration is rejected.
-echo "==> signing (ad-hoc)"
-codesign --force --sign - --timestamp=none "$BUNDLE"
+# Some signature is required: without one, macOS refuses a notification token
+# and login-item registration. Prefer the release identity so Keychain consent
+# survives across local rebuilds.
+sign_bundle() {
+    FOUND="$(security find-identity -v -p codesigning \
+        | sed -n 's/.*"\(Developer ID Application: .*\)".*/\1/p')"
+    COUNT="$(printf '%s' "$FOUND" | grep -c . || true)"
+    ID=""
+
+    if [ -n "${DEVELOPER_ID:-}" ]; then
+        if printf '%s\n' "$FOUND" | grep -qxF "$DEVELOPER_ID"; then
+            ID="$DEVELOPER_ID"
+        else
+            echo "    DEVELOPER_ID is set but that certificate is not installed — trying ad-hoc"
+        fi
+    elif [ "$COUNT" -eq 1 ]; then
+        ID="$FOUND"
+    elif [ "$COUNT" -gt 1 ]; then
+        echo "    more than one Developer ID certificate — set DEVELOPER_ID in .env or using ad-hoc"
+    fi
+
+    if [ -n "$ID" ]; then
+        echo "==> signing (Developer ID)"
+        if codesign --force --options runtime --timestamp --sign "$ID" "$BUNDLE"; then
+            return 0
+        fi
+        echo "    Developer ID sign failed — falling back to ad-hoc"
+    fi
+
+    echo "==> signing (ad-hoc)"
+    codesign --force --sign - --timestamp=none "$BUNDLE"
+}
+sign_bundle
 
 if [ "${1:-}" = "--install" ]; then
     echo "==> installing to ${INSTALL_DIR}"

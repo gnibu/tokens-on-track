@@ -310,6 +310,11 @@ struct ProviderBlock: View {
     /// trace the ring back to the window it came from.
     var worstRow: String? = nil
 
+    /// Rows sit under the provider name, not under the mark — icon + gap from the header.
+    private var rowLeadingInset: CGFloat {
+        BrandGlyph.width(for: provider.name, height: metrics.markSize) + 9
+    }
+
     var body: some View {
         let note = Pace.note(provider, timing: timing)
 
@@ -353,6 +358,7 @@ struct ProviderBlock: View {
                     )
                 }
             }
+            .padding(.leading, rowLeadingInset)
             .opacity(provider.stale ? 0.55 : 1)
         }
     }
@@ -435,6 +441,7 @@ struct UsageRow: View {
                         .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
                         .foregroundStyle(Glass.ink(isWorst ? 0.95 : 0.6))
                         .lineLimit(1)
+                        .truncationMode(.tail)
                         .minimumScaleFactor(0.75)
                         .allowsTightening(true)
                     if let cost {
@@ -469,6 +476,9 @@ struct UsageRow: View {
                 .font(.system(size: metrics.resetSize))
                 .monospacedDigit()
                 .foregroundStyle(Glass.ink(0.45))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
                 .frame(width: metrics.reset, alignment: .trailing)
         }
     }
