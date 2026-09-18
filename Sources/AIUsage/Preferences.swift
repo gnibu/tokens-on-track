@@ -143,6 +143,23 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(showOpenRouterCosts, forKey: Keys.showOpenRouterCosts) }
     }
 
+    /// Local display budget for Cursor team Admin keys that do not already
+    /// carry a spend limit. Personal dashboard readings ignore this.
+    @Published var cursorMonthlyBudget: Double? {
+        didSet {
+            if let value = cursorMonthlyBudget {
+                defaults.set(value, forKey: Keys.cursorMonthlyBudget)
+            } else {
+                defaults.removeObject(forKey: Keys.cursorMonthlyBudget)
+            }
+        }
+    }
+
+    /// Optional exact spend lines below Cursor's percentage rows.
+    @Published var showCursorCosts: Bool {
+        didSet { defaults.set(showCursorCosts, forKey: Keys.showCursorCosts) }
+    }
+
     /// Providers the user has chosen not to see, by name. A never-set-up
     /// provider is hidden automatically; this is for hiding one you *do* have.
     @Published var hiddenProviders: Set<String> {
@@ -206,6 +223,8 @@ final class Preferences: ObservableObject {
         static let refreshMinutes = "refreshMinutes"
         static let openRouterMonthlyBudget = "openRouterMonthlyBudget"
         static let showOpenRouterCosts = "showOpenRouterCosts"
+        static let cursorMonthlyBudget = "cursorMonthlyBudget"
+        static let showCursorCosts = "showCursorCosts"
         static let hiddenProviders = "hiddenProviders"
         static let hiddenModelLimits = "hiddenModelLimits"
         static let knownModelLimits = "knownModelLimits"
@@ -246,6 +265,7 @@ final class Preferences: ObservableObject {
             Keys.paceAlerts: true,
             Keys.refreshMinutes: 10.0,
             Keys.showOpenRouterCosts: false,
+            Keys.showCursorCosts: false,
         ])
         showLogoInMenuBar = defaults.bool(forKey: Keys.showLogo)
         showGaugeInMenuBar = defaults.bool(forKey: Keys.showGauge)
@@ -278,6 +298,13 @@ final class Preferences: ObservableObject {
             openRouterMonthlyBudget = nil
         }
         showOpenRouterCosts = defaults.bool(forKey: Keys.showOpenRouterCosts)
+        if defaults.object(forKey: Keys.cursorMonthlyBudget) != nil {
+            let value = defaults.double(forKey: Keys.cursorMonthlyBudget)
+            cursorMonthlyBudget = value.isFinite && value > 0 ? value : nil
+        } else {
+            cursorMonthlyBudget = nil
+        }
+        showCursorCosts = defaults.bool(forKey: Keys.showCursorCosts)
         hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
         var hiddenModels = Set(defaults.stringArray(forKey: Keys.hiddenModelLimits) ?? [])
         var knownModels = defaults.data(forKey: Keys.knownModelLimits)

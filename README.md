@@ -3,9 +3,10 @@
 **Use every token. Never run dry.**
 
 Tokens on Track is a macOS menu bar app showing how much of your **Claude Code**
-and **Codex** quota you have burned, plus **OpenRouter** spend against a budget
-you choose. It shows whether you are spending faster than the window refills,
-refreshes every 10 minutes by default, and tells you when you are running hot.
+and **Codex** quota you have burned, plus **OpenRouter** and **Cursor** spend
+against the budgets those services expose. It shows whether you are spending
+faster than the window refills, refreshes every 10 minutes by default, and tells
+you when you are running hot.
 
 <img src="docs/screenshots/menubar.png" width="163" alt="The menu bar item: a Claude mark with a green ring at 70% marked w, and a second at 53% marked h.">
 
@@ -28,6 +29,8 @@ week (Spark)▓───┃──────    1%  Mon 08:36
 OpenRouter                       $20/MO
 day         ▓▓──┃──────   16%     00:00
 month       ▓───┃──────    1%  Wed 00:00
+Cursor                             PRO
+month       ▓▓──┃──────   10%     16:23
 ```
 
 - **Bar** — quota consumed in that window.
@@ -48,7 +51,8 @@ month       ▓───┃──────    1%  Wed 00:00
 1. **[Download the latest `.dmg`](https://github.com/gnibu/tokens-on-track/releases/latest/download/TokensOnTrack.dmg)**, open it, and drag **Tokens on Track**
    to *Applications*.
 2. Launch it. Approve the notification prompt, and the Keychain prompt if one appears
-   (only Claude's token lives in the Keychain — a Codex-only setup never sees it).
+   (Claude's token and any key you paste in Settings live in the Keychain —
+   a Codex-only setup never sees a prompt).
 
 The download is signed with a Developer ID certificate and notarized by Apple, so
 Gatekeeper does not block it on a Mac that has never seen it. macOS may still ask
@@ -100,7 +104,8 @@ The Settings tab groups them the way System Settings does: *Menu bar* (which
 parts to draw, how many windows), *Display* (whether percentages show *Used* or
 *Vs target*, desktop card on/off, its layer, open at login), *OpenRouter*
 (connection, optional API key, one monthly USD budget, and optional dollar
-details), *Working hours*
+details), *Cursor* (connection, optional API key or session token, an optional
+monthly budget for team Admin keys, and optional dollar details), *Working hours*
 (selected days and one shared time range), *Alerts* (both thresholds, on
 sliders rather than steppers), and *Refresh* (5, 15, 30 or 60 minutes).
 
@@ -140,8 +145,9 @@ bar ring, the dropdown and the desktop card can never disagree.
 
 | Source file | Job |
 | --- | --- |
-| `Fetcher.swift` | discovers credentials and calls the three usage APIs |
+| `Fetcher.swift` | discovers credentials and calls the usage APIs |
 | `OpenRouter.swift` | derives daily and monthly budget windows from spend |
+| `Cursor.swift` | maps Cursor's billing cycle and team spend into the same windows |
 | `Report.swift` | the JSON written to the cache |
 | `WorkSchedule.swift` | local working intervals, DST and schedule boundaries |
 | `Pace.swift` | target share, active time basis, pace rate, colours, reset labels |
@@ -159,11 +165,15 @@ bar ring, the dropdown and the desktop card can never disagree.
 | Claude | Keychain item `Claude Code-credentials` (written by Claude Code) | `GET api.anthropic.com/api/oauth/usage` |
 | Codex | `~/.codex/auth.json` (written by the Codex CLI) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
+| Cursor | signed-in Cursor app session, app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, or a running Conductor Cursor process | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
 
 The Claude and Codex endpoints are the same first-party endpoints the CLIs
 themselves call, and both are **undocumented internal APIs**. They can change
 shape or start rejecting non-CLI callers without notice. OpenRouter uses its
-documented key endpoint.
+documented key endpoint. Cursor's personal usage comes from the same dashboard
+summary the website draws; a team Admin API key (`crsr_…` with `admin:*`) uses
+the documented Admin spend endpoint instead. A personal user/agent API key
+cannot read usage.
 
 Which windows appear depends on what each API returns for your plan:
 
@@ -182,21 +192,30 @@ Which windows appear depends on what each API returns for your plan:
   can show the spend and allowance beneath each percentage, keeping cents — and
   sub-cent spend — visible rather than rounding them away. Until a budget
   is defined, the app shows one setup notice instead of an empty provider block.
+- Cursor reports the current billing cycle from the signed-in Cursor app on
+  this Mac. Optional Auto, API and on-demand rows appear when those counters
+  are in use; each can be hidden from Settings like other model-specific
+  limits. A team Admin key instead reports cycle spend against the key's spend
+  limit, or against a monthly budget entered in Settings. A user/agent API key
+  cannot read usage on its own; the app then uses the signed-in Cursor session
+  if one is available.
 
 ## Security
 
 Worth understanding before running something that touches your API credentials.
 
 - Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
-  `~/.codex/auth.json`, and an OpenRouter key from the first available configured
-  source. A key entered in Settings is stored in the app's own Keychain item.
-- Conductor's OpenRouter key is available only inside its managed OpenCode
+  `~/.codex/auth.json`, a Cursor session from the Cursor app's Keychain item
+  `cursor-access-token` or `state.vscdb`, and an OpenRouter or Cursor key from
+  the first available configured source. A key entered in Settings is stored in
+  the app's own Keychain item.
+- Conductor's OpenRouter or Cursor key is available only inside its managed
   process. While that process is running, the app can read its same-user process
   environment as a best-effort fallback; it never copies that key into storage.
 - Sends each token *only* to its own provider's host. No third party, no
   telemetry, no analytics.
-- Never prints or logs a token. The cache holds usage values, OpenRouter spend
-  totals and budgets, reset timestamps and plan names — nothing secret.
+- Never prints or logs a token. The cache holds usage values, OpenRouter and
+  Cursor spend totals and budgets, reset timestamps and plan names — nothing secret.
 - Read-only on provider-owned credential stores. It never writes or refreshes
   their tokens. Only a key explicitly entered in Settings is written, and only
   to the app's own Keychain item.

@@ -49,6 +49,7 @@ enum BrandGlyph {
         "claude": "claude.svg",
         "codex": "openai.svg",
         "openrouter": "openrouter.svg",
+        "cursor": "cursor.svg",
     ]
 
     /// Reading and parsing is a file plus a few hundred segments of curve

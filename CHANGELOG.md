@@ -16,6 +16,10 @@ published with generated notes on the
   across every surface from Settings.
 - A refresh button on the desktop card, and a spinner on both refresh buttons
   while a poll is in flight.
+- Cursor as a usage provider. The signed-in Cursor app session is discovered
+  automatically; Settings can also store a team Admin API key or a dashboard
+  session token. Personal accounts show the current billing cycle, with Auto,
+  API and on-demand rows when those counters are in use.
 
 ### Changed
 

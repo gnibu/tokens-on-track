@@ -73,7 +73,9 @@ struct DesktopUsageCard: View {
                         metrics: .card,
                         mode: preferences.percentMode,
                         timing: timing,
-                        showsCost: preferences.showOpenRouterCosts,
+                        showsCost: provider.name == "Cursor"
+                            ? preferences.showCursorCosts
+                            : preferences.showOpenRouterCosts,
                         worstRow: verdict.rowKey
                     )
                 }
@@ -172,7 +174,9 @@ struct MenuUsageView: View {
                             mode: preferences.percentMode,
                             timing: timing,
                             showsNote: false,
-                            showsCost: preferences.showOpenRouterCosts,
+                            showsCost: provider.name == "Cursor"
+                                ? preferences.showCursorCosts
+                                : preferences.showOpenRouterCosts,
                             worstRow: verdict.rowKey
                         )
                     }
@@ -265,6 +269,7 @@ struct OutageNotice: View {
     /// key gets an actionable route to the reliable credential field.
     private static func outageReason(_ provider: Provider) -> String {
         if let reconnect = OpenRouterCredential.reconnectMessage(for: provider) { return reconnect }
+        if let reconnect = CursorCredential.reconnectMessage(for: provider) { return reconnect }
         return provider.error ?? "no reading"
     }
 }

@@ -199,8 +199,13 @@ struct Provider: Codable, Identifiable, Equatable {
 
     /// The warning remains useful, but an empty provider block underneath it
     /// only repeats that setup is incomplete.
-    var needsOpenRouterBudget: Bool {
-        name == "OpenRouter" && error == OpenRouterBudget.missingBudgetMessage
+    var needsOpenRouterBudget: Bool { needsBudget }
+
+    /// A credential worked but the local spend budget has not been set, so
+    /// there is nothing to draw until Settings supplies one.
+    var needsBudget: Bool {
+        error == OpenRouterBudget.missingBudgetMessage
+            && (name == "OpenRouter" || name == "Cursor")
     }
 
     init(from decoder: Decoder) throws {
@@ -391,6 +396,43 @@ struct Report: Codable, Equatable {
         return copy
     }
 
+    /// Rebuild Cursor spend windows from cached dollars when the local budget
+    /// changes. Dashboard readings already carry API percentages, so they are
+    /// left alone — only the Admin-key spend mapping uses this path.
+    func rebudgetingCursor(monthlyBudget: Double?, now: Date = Date()) -> Report {
+        var copy = self
+        guard let index = copy.providers.firstIndex(where: { $0.name == "Cursor" }) else {
+            return copy
+        }
+        var provider = copy.providers[index]
+        guard provider.windows.allSatisfy({ $0.model == nil }),
+              let monthly = provider.windows.first(where: { $0.label == "month" })?.spentUSD
+        else { return copy }
+
+        guard let budget = monthlyBudget, budget.isFinite, budget > 0 else {
+            provider.ok = false
+            provider.stale = false
+            provider.plan = nil
+            provider.error = CursorBudget.missingBudgetMessage
+            provider.windows = CursorBudget.unbudgetedWindows(monthlySpend: monthly, now: now)
+            copy.providers[index] = provider
+            return copy
+        }
+
+        provider.plan = CursorBudget.plan(monthlyBudget: budget)
+        provider.windows = CursorBudget.windows(
+            monthlySpend: monthly,
+            monthlyBudget: budget,
+            now: now
+        )
+        if provider.error == CursorBudget.missingBudgetMessage {
+            provider.ok = true
+            provider.error = nil
+        }
+        copy.providers[index] = provider
+        return copy
+    }
+
     /// Model-specific quota switches currently worth offering in Settings.
     /// Preserve provider/window order and collapse several windows for one
     /// model into a single switch.
@@ -419,10 +461,10 @@ struct Report: Codable, Equatable {
     /// carry over. A poll that failed is not the end of the story — the timer
     /// asks again — so the surfaces use this to promise the automatic retry
     /// instead of leaving an empty card looking final. A provider that was
-    /// never set up is not a retry, and neither is OpenRouter waiting on a
-    /// budget: no poll will fix either one.
+    /// never set up is not a retry, and neither is a cost-backed provider
+    /// waiting on a budget: no poll will fix either one.
     var hasNoReading: Bool {
-        let set = providers.filter { $0.loggedIn && !$0.needsOpenRouterBudget }
+        let set = providers.filter { $0.loggedIn && !$0.needsBudget }
         guard !set.isEmpty else { return false }
         return !set.contains { $0.ok && !$0.windows.isEmpty }
     }
@@ -434,7 +476,7 @@ struct Report: Codable, Equatable {
     /// a missing budget is not this either. Used to poll again in a minute
     /// rather than wait out the user's interval for the card to fill back in.
     var needsFastRetry: Bool {
-        let set = providers.filter { $0.loggedIn && !$0.needsOpenRouterBudget }
+        let set = providers.filter { $0.loggedIn && !$0.needsBudget }
         guard !set.isEmpty else { return false }
         return set.allSatisfy(\.unreachable)
     }
