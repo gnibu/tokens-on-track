@@ -275,7 +275,9 @@ cd tokens-on-track
 
 That compiles, wraps the binary in `Tokens on Track.app`, ad-hoc signs it, copies
 it to `/Applications` and launches it. Drop `--install` to build into `.build/`
-and leave `/Applications` alone.
+and leave `/Applications` alone. The footer identifies source builds using
+Git's standard descriptive form, such as `v1.1.2-3-gabc1234-dirty`; a published
+build shows only its exact release version.
 
 **Requirements:** macOS 14+ and Command Line Tools (`xcode-select --install`).
 Full Xcode is *not* needed; there is no `.xcodeproj`, `build.sh` assembles the

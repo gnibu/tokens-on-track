@@ -1,9 +1,10 @@
 # Changelog
 
 Notable changes, newest first. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions match the
-git tags and `CFBundleShortVersionString`. Each release is also published with
-generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/releases).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions
+match the git tags and `CFBundleShortVersionString`. Each release is also
+published with generated notes on the
+[releases page](https://github.com/gnibu/tokens-on-track/releases).
 
 ## [Unreleased]
 
@@ -18,6 +19,9 @@ generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/
 
 ### Changed
 
+- Development builds display the preceding release, commit distance, short Git
+  SHA and dirty state; published app, bundle, DMG and tag versions are stamped
+  from one implementation.
 - The default refresh interval is 10 minutes (was 15), and 10 is now a
   selectable interval alongside 5, 15, 30 and 60.
 - A poll that lands nothing now says the app keeps retrying by itself, instead

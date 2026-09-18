@@ -593,7 +593,10 @@ private struct SettingsTab: View {
     }
 
     private static var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let info = Bundle.main.infoDictionary
+        return info?["TOTDisplayVersion"] as? String
+            ?? info?["CFBundleShortVersionString"] as? String
+            ?? "dev"
     }
 
     // ----------------------------------------------------------------- //
