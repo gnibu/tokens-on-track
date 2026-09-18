@@ -481,7 +481,8 @@ enum Pace {
 
         if at.timeIntervalSince(now) >= 6 * 86400 {
             let long = DateFormatter()
-            long.dateFormat = "MMM d HH:mm"
+            // Compact enough for the reset column beside multi-row providers.
+            long.dateFormat = "M/d HH:mm"
             return long.string(from: at)
         }
         let weekday = DateFormatter()

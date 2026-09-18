@@ -19,11 +19,8 @@ struct PanelView: View {
 
             switch tab {
             case .usage:
-                VStack(alignment: .leading, spacing: 16) {
-                    MenuUsageView()
-                    usageFooter
-                }
-                .padding(EdgeInsets(top: 4, leading: 18, bottom: 18, trailing: 18))
+                MenuUsageView()
+                    .padding(EdgeInsets(top: 4, leading: 18, bottom: 18, trailing: 18))
 
             case .settings:
                 SettingsTab()
@@ -47,6 +44,19 @@ struct PanelView: View {
             )
 
             if tab == .usage {
+                Spacer(minLength: 4)
+
+                HStack(spacing: 6) {
+                    if store.isOffline {
+                        GlassSpinner(size: 11)
+                    }
+                    Text(usageStatusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Glass.ink(0.4))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+
                 GlassButton(
                     label: "",
                     systemImage: "arrow.clockwise",
@@ -62,22 +72,7 @@ struct PanelView: View {
         .padding(.vertical, 14)
     }
 
-    private var usageFooter: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                if store.isOffline {
-                    GlassSpinner(size: 11)
-                }
-                Text(footerText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Glass.ink(0.4))
-            }
-            Spacer(minLength: 8)
-            GlassLink(title: "Quit") { NSApplication.shared.terminate(nil) }
-        }
-    }
-
-    private var footerText: String {
+    private var usageStatusText: String {
         let every = store.retryCadenceLabel
         guard let report = store.report else { return "No reading yet · retrying \(every)" }
         if store.isRefreshing { return "Refreshing… · \(every)" }
