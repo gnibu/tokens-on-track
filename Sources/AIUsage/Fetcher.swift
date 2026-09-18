@@ -13,21 +13,31 @@ enum Fetcher {
     static let codexAuthPath = ("~/.codex/auth.json" as NSString).expandingTildeInPath
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
     static let openRouterUsageURL = URL(string: "https://openrouter.ai/api/v1/key")!
+    static let cursorUsageSummaryURL = URL(string: "https://cursor.com/api/usage-summary")!
+    static let cursorTeamSpendURL = URL(string: "https://api.cursor.com/teams/spend")!
     static let codexUserAgent = "codex_cli_rs/0.56.0 (Mac OS 26.4.0; arm64) Terminal"
 
     static let timeout: TimeInterval = 20
 
     /// The providers this app knows how to poll, in display order. Named so the
     /// store can schedule each one on its own cadence.
-    static let providerNames = ["Claude", "Codex", "OpenRouter"]
+    static let providerNames = ["Claude", "Codex", "OpenRouter", "Cursor"]
 
     /// Fetch every named provider, concurrently. A provider left out is one the
     /// caller has decided is not due yet.
-    static func fetch(names: [String], openRouterMonthlyBudget: Double?) async -> [Provider] {
+    static func fetch(
+        names: [String],
+        openRouterMonthlyBudget: Double?,
+        cursorMonthlyBudget: Double?
+    ) async -> [Provider] {
         await withTaskGroup(of: Provider.self) { group in
             for name in names {
                 group.addTask {
-                    await fetch(name, openRouterMonthlyBudget: openRouterMonthlyBudget)
+                    await fetch(
+                        name,
+                        openRouterMonthlyBudget: openRouterMonthlyBudget,
+                        cursorMonthlyBudget: cursorMonthlyBudget
+                    )
                 }
             }
             var providers: [Provider] = []
@@ -36,11 +46,16 @@ enum Fetcher {
         }
     }
 
-    static func fetch(_ name: String, openRouterMonthlyBudget: Double?) async -> Provider {
+    static func fetch(
+        _ name: String,
+        openRouterMonthlyBudget: Double?,
+        cursorMonthlyBudget: Double?
+    ) async -> Provider {
         switch name {
         case "Claude": return await fetchClaude()
         case "Codex": return await fetchCodex()
         case "OpenRouter": return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
+        case "Cursor": return await fetchCursor(monthlyBudget: cursorMonthlyBudget)
         default: return Provider(name: name)
         }
     }
@@ -378,6 +393,250 @@ enum Fetcher {
     }
 
     // ----------------------------------------------------------------- //
+    // Cursor
+    // ----------------------------------------------------------------- //
+
+    static func fetchCursor(monthlyBudget: Double?) async -> Provider {
+        var provider = Provider(name: "Cursor")
+        let candidates = cursorCandidates()
+        guard !candidates.isEmpty else {
+            provider.error = CursorBudget.notConnectedMessage
+            return provider
+        }
+        provider.loggedIn = true
+
+        var lastError: String?
+        var fallback: Provider?
+        for candidate in candidates {
+            provider.credentialSource = candidate.source
+            if candidate.isAPIKey {
+                let result = await fetchCursorAdmin(candidate: candidate, monthlyBudget: monthlyBudget)
+                if result.skipToNext {
+                    lastError = result.provider.error ?? lastError
+                    if result.provider.ok { fallback = result.provider }
+                    continue
+                }
+                return result.provider
+            }
+            if let session = candidate.session {
+                let result = await fetchCursorSession(session, source: candidate.source)
+                if result.skipToNext {
+                    lastError = result.provider.error ?? lastError
+                    if result.provider.ok { fallback = result.provider }
+                    continue
+                }
+                return result.provider
+            }
+            if candidate.authoritative {
+                provider.error = "key rejected — update it in Settings"
+                return provider
+            }
+        }
+
+        if let fallback { return fallback }
+        provider.error = lastError ?? "stored key was rejected"
+        return provider
+    }
+
+    private struct CursorAttempt {
+        let provider: Provider
+        let skipToNext: Bool
+    }
+
+    private static func fetchCursorAdmin(
+        candidate: CursorCredential.Candidate,
+        monthlyBudget: Double?
+    ) async -> CursorAttempt {
+        var provider = Provider(name: "Cursor")
+        provider.loggedIn = true
+        provider.credentialSource = candidate.source
+        let auth = basicAuth(user: candidate.secret, password: "")
+        let data: [String: Any]
+        do {
+            data = try await requestJSONRetrying(
+                cursorTeamSpendURL,
+                method: "POST",
+                headers: [
+                    "Authorization": auth,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Tokens-on-Track",
+                ],
+                body: ["page": 1, "pageSize": 100]
+            )
+        } catch let error as HTTPStatus {
+            if error.code == 401 || error.code == 403 {
+                provider.error = candidate.authoritative
+                    ? CursorBudget.userKeyMessage
+                    : "stored key was rejected"
+                // A personal user/agent key is valid and still cannot read
+                // usage. Keep looking for a dashboard session.
+                return CursorAttempt(provider: provider, skipToNext: true)
+            }
+            provider.error = cursorNote(for: error.code, manual: candidate.authoritative)
+            if error.code >= 500 { provider.unreachable = true }
+            return CursorAttempt(provider: provider, skipToNext: false)
+        } catch {
+            provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+            provider.unreachable = true
+            return CursorAttempt(provider: provider, skipToNext: false)
+        }
+
+        let members = (data["teamMemberSpend"] as? [[String: Any]]) ?? []
+        guard let spend = CursorBudget.spend(fromTeamMembers: members) else {
+            provider.error = "no spend data"
+            return CursorAttempt(provider: provider, skipToNext: false)
+        }
+
+        let budget = monthlyBudget ?? spend.limit
+        guard let budget, budget.isFinite, budget > 0 else {
+            provider.windows = CursorBudget.unbudgetedWindows(monthlySpend: spend.spent)
+            provider.error = CursorBudget.missingBudgetMessage
+            return CursorAttempt(provider: provider, skipToNext: false)
+        }
+
+        provider.plan = CursorBudget.plan(monthlyBudget: budget)
+        provider.windows = CursorBudget.windows(monthlySpend: spend.spent, monthlyBudget: budget)
+        provider.ok = true
+        return CursorAttempt(provider: provider, skipToNext: false)
+    }
+
+    private static func fetchCursorSession(
+        _ session: CursorCredential.Session,
+        source: OpenRouterCredential.Source
+    ) async -> CursorAttempt {
+        var provider = Provider(name: "Cursor")
+        provider.loggedIn = true
+        provider.credentialSource = source
+        let data: [String: Any]
+        do {
+            data = try await requestJSONRetrying(
+                cursorUsageSummaryURL,
+                headers: [
+                    "Cookie": "WorkosCursorSessionToken=\(session.cookie)",
+                    "Accept": "application/json",
+                    "Origin": "https://cursor.com",
+                    "Referer": "https://cursor.com/dashboard",
+                    "User-Agent": "Tokens-on-Track",
+                ]
+            )
+        } catch let error as HTTPStatus {
+            if error.code == 401 {
+                provider.error = source == .keychain
+                    ? "key rejected — update it in Settings"
+                    : "stored token went stale — open Cursor once"
+                provider.staleToken = source != .keychain
+                return CursorAttempt(provider: provider, skipToNext: source != .keychain)
+            }
+            provider.error = cursorNote(for: error.code, manual: source == .keychain)
+            if error.code >= 500 { provider.unreachable = true }
+            return CursorAttempt(provider: provider, skipToNext: false)
+        } catch {
+            provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+            provider.unreachable = true
+            return CursorAttempt(provider: provider, skipToNext: false)
+        }
+
+        provider.windows = CursorBudget.windows(fromSummary: data)
+        provider.plan = CursorBudget.plan(data["membershipType"] as? String)
+        provider.ok = !provider.windows.isEmpty
+        if !provider.ok { provider.error = "no limit data" }
+        // A leftover free login can answer 200 with an empty quota next to a
+        // live Pro session. Keep looking unless this was the key the user saved.
+        if provider.ok, CursorBudget.isPlaceholderSummary(data), source != .keychain {
+            return CursorAttempt(provider: provider, skipToNext: true)
+        }
+        return CursorAttempt(provider: provider, skipToNext: false)
+    }
+
+    private static func cursorCandidates() -> [CursorCredential.Candidate] {
+        var candidates: [CursorCredential.Candidate] = []
+        if let key = CursorKeychain.read() {
+            candidates.append(.init(secret: key, source: .keychain, authoritative: true))
+        }
+        if let key = ProcessInfo.processInfo.environment["CURSOR_API_KEY"], !key.isEmpty {
+            candidates.append(.init(secret: key, source: .environment, authoritative: false))
+        }
+        if let key = ProcessInfo.processInfo.environment["CURSOR_SESSION_TOKEN"], !key.isEmpty {
+            candidates.append(.init(secret: key, source: .environment, authoritative: false))
+        }
+        if let jwt = cursorStateToken() {
+            candidates.append(.init(secret: jwt, source: .cursorApp, authoritative: false))
+        }
+        if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
+            .flatMap({ String(data: $0, encoding: .utf8) })
+        {
+            candidates.append(.init(secret: jwt, source: .cursorApp, authoritative: false))
+        }
+        if let key = keychainSecret(
+            service: CursorCredential.conductorSettingsService,
+            account: CursorCredential.conductorAPIKeyAccount
+        ).flatMap({ String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }),
+           !key.isEmpty
+        {
+            candidates.append(.init(secret: key, source: .conductor, authoritative: false))
+        }
+        candidates += conductorCursorKeys().map {
+            .init(secret: $0, source: .conductor, authoritative: false)
+        }
+
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0.secret).inserted }
+    }
+
+    private static func cursorStateToken() -> String? {
+        guard FileManager.default.fileExists(atPath: CursorCredential.stateDBPath) else { return nil }
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/sqlite3"),
+            arguments: [
+                "-readonly",
+                "-batch",
+                CursorCredential.stateDBPath,
+                "SELECT value FROM ItemTable WHERE key = '\(CursorCredential.accessTokenKey)';",
+            ],
+            timeout: 5
+        ), let token = String(data: raw, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty
+        else { return nil }
+        return token
+    }
+
+    private static func conductorCursorKeys() -> [String] {
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
+            timeout: 5
+        ), let list = String(data: raw, encoding: .utf8)
+        else { return [] }
+
+        return CursorCredential.conductorPIDs(in: list).compactMap { pid in
+            guard let raw = runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["eww", "-p", String(pid), "-o", "command="],
+                timeout: 5
+            ), let environment = String(data: raw, encoding: .utf8)
+            else { return nil }
+            return CursorCredential.key(inProcessEnvironment: environment)
+        }
+    }
+
+    private static func cursorNote(for code: Int, manual: Bool) -> String {
+        switch code {
+        case 401: return manual ? "key rejected — update it in Settings" : "stored key was rejected"
+        case 403: return CursorBudget.userKeyMessage
+        case 429: return "rate limited — the reading will catch up"
+        case 500...599: return "the service is not answering (http \(code))"
+        default: return "http \(code)"
+        }
+    }
+
+    private static func basicAuth(user: String, password: String) -> String {
+        let blob = Data("\(user):\(password)".utf8).base64EncodedString()
+        return "Basic \(blob)"
+    }
+
+    // ----------------------------------------------------------------- //
     // plumbing
     // ----------------------------------------------------------------- //
 
@@ -406,6 +665,16 @@ enum Fetcher {
                   let token = tokens["access_token"] as? String
             else { return nil }
             return jwtExpiry(token)
+        case "Cursor":
+            if let saved = CursorKeychain.read(), let jwt = CursorCredential.session(from: saved)?.jwt {
+                return jwtExpiry(jwt)
+            }
+            if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
+                .flatMap({ String(data: $0, encoding: .utf8) })
+            {
+                return jwtExpiry(jwt)
+            }
+            return cursorStateToken().flatMap(jwtExpiry)
         default:
             return nil
         }
@@ -414,16 +683,20 @@ enum Fetcher {
     /// The `exp` claim (epoch seconds) from a JWT's payload, read without
     /// verifying the signature — enough to see whether the token has expired.
     static func jwtExpiry(_ token: String) -> Double? {
+        (jwtPayload(token)?["exp"] as? NSNumber)?.doubleValue
+    }
+
+    /// Claims from a JWT payload, unverified. Used to read expiry and the
+    /// session `sub` Cursor's dashboard cookie is built from.
+    static func jwtPayload(_ token: String) -> [String: Any]? {
         let parts = token.split(separator: ".")
         guard parts.count == 3 else { return nil }
         var payload = String(parts[1])
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         while payload.count % 4 != 0 { payload.append("=") }
-        guard let data = Data(base64Encoded: payload),
-              let exp = (json(data)?["exp"] as? NSNumber)?.doubleValue
-        else { return nil }
-        return exp
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        return json(data)
     }
 
     /// What to tell the reader about a failed poll.
@@ -449,12 +722,22 @@ enum Fetcher {
         _ url: URL,
         headers: [String: String]
     ) async throws -> [String: Any] {
+        try await requestJSONRetrying(url, method: "GET", headers: headers, body: nil)
+    }
+
+    private static func requestJSONRetrying(
+        _ url: URL,
+        method: String = "GET",
+        headers: [String: String],
+        body: [String: Any]? = nil
+    ) async throws -> [String: Any] {
+        let payload = body.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         do {
-            return try await getJSON(url, headers: headers)
+            return try await requestJSON(url, method: method, headers: headers, body: payload)
         } catch {
             guard retryable(error) else { throw error }
             try await Task.sleep(nanoseconds: 2_000_000_000)
-            return try await getJSON(url, headers: headers)
+            return try await requestJSON(url, method: method, headers: headers, body: payload)
         }
     }
 
@@ -463,9 +746,18 @@ enum Fetcher {
         return status.code == 403 || status.code == 429 || status.code >= 500
     }
 
-    private static func getJSON(_ url: URL, headers: [String: String]) async throws -> [String: Any] {
+    private static func requestJSON(
+        _ url: URL,
+        method: String,
+        headers: [String: String],
+        body: Data?
+    ) async throws -> [String: Any] {
         var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = method
+        // URLSession otherwise owns the Cookie header and will drop one we set.
+        request.httpShouldHandleCookies = false
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.httpBody = body
         let (data, response) = try await URLSession.shared.data(for: request)
         if let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
             throw HTTPStatus(code: status)
@@ -480,10 +772,13 @@ enum Fetcher {
     /// Shelled out rather than done through SecItemCopyMatching, which keeps
     /// the app out of the keychain-entitlement business and reuses the consent
     /// the item's ACL already grants `security`. macOS asks the first time.
-    private static func keychainSecret(service: String) -> Data? {
-        runProcess(
+    private static func keychainSecret(service: String, account: String? = nil) -> Data? {
+        var arguments = ["find-generic-password", "-s", service]
+        if let account { arguments += ["-a", account] }
+        arguments.append("-w")
+        return runProcess(
             executableURL: URL(fileURLWithPath: "/usr/bin/security"),
-            arguments: ["find-generic-password", "-s", service, "-w"],
+            arguments: arguments,
             timeout: 15
         )
     }

@@ -28,6 +28,15 @@ enum RegressionTests {
         testOpenCodeOpenRouterCredentialIsParsed()
         testConductorCredentialEnvironmentIsParsed()
         testOpenRouterDollarFormatting()
+        testCursorSummaryBecomesCycleWindows()
+        testCursorSummaryOmitsZeroBreakdown()
+        testCursorProSpendUnderOneThousandCents()
+        testCursorSessionCookieIsBuiltFromJWT()
+        testCursorAPIKeyIsNotASession()
+        testCursorTeamSpendMapsCents()
+        testCursorRebudgetsCachedSpend()
+        testCursorReconnectMessages()
+        testConductorCursorEnvironmentIsParsed()
         testBusiestWindowsIgnoreWhoOwnsThem()
         testFairShareGivesEveryProviderASlot()
         testFairShareSpendsSpareSlotsOnTheNextWorstWindow()
@@ -483,6 +492,205 @@ enum RegressionTests {
         )
     }
 
+    private static func testCursorSummaryBecomesCycleWindows() {
+        let summary: [String: Any] = [
+            "billingCycleStart": "2026-09-11T16:23:42.215Z",
+            "billingCycleEnd": "2026-10-11T16:23:42.215Z",
+            "membershipType": "pro",
+            "individualUsage": [
+                "plan": [
+                    "used": 1529,
+                    "limit": 2000,
+                    "autoPercentUsed": 13.21,
+                    "apiPercentUsed": 3.16,
+                    "totalPercentUsed": 10.19,
+                ],
+                "onDemand": [
+                    "enabled": true,
+                    "used": 4.5,
+                    "limit": 20,
+                ],
+            ],
+        ]
+        let windows = CursorBudget.windows(fromSummary: summary)
+        check(
+            windows.map(\.label) == ["month", "month (Auto)", "month (API)", "on-demand"],
+            "Cursor must expose cycle, auto, API and on-demand"
+        )
+        check(close(windows[0].percent, 10.19), "the cycle row must keep the API percentage")
+        check(close(windows[0].spentUSD, 15.29), "dashboard cents must become dollars")
+        check(close(windows[0].budgetUSD, 20), "a 2000-cent limit is $20")
+        check(windows[1].model == "Auto" && windows[2].model == "API", "breakdown rows must be hideable models")
+        check(CursorBudget.plan("pro") == "PRO", "membership becomes the plan badge")
+        check(CursorBudget.plan("pro_plus") == "PRO+", "pro plus must stay compact")
+        let reset = windows[0].resetsAt ?? 0
+        check(reset > 1_700_000_000, "the cycle must have a real reset timestamp")
+        check(windows[0].windowSeconds == windows[1].windowSeconds, "breakdown rows share the billing cycle")
+    }
+
+    private static func testCursorSummaryOmitsZeroBreakdown() {
+        let summary: [String: Any] = [
+            "billingCycleStart": "2026-09-11T16:23:42Z",
+            "billingCycleEnd": "2026-10-11T16:23:42Z",
+            "individualUsage": [
+                "plan": [
+                    "used": 0,
+                    "limit": 0,
+                    "autoPercentUsed": 0,
+                    "apiPercentUsed": 0,
+                    "totalPercentUsed": 0,
+                ]
+            ],
+        ]
+        let windows = CursorBudget.windows(fromSummary: summary)
+        check(windows.map(\.label) == ["month"], "a zero cycle must not sprout empty Auto/API rows")
+        check(windows[0].spentUSD == nil, "a zero limit must not invent dollar amounts")
+    }
+
+    private static func testCursorProSpendUnderOneThousandCents() {
+        let summary: [String: Any] = [
+            "billingCycleStart": "2026-09-18T15:28:02.000Z",
+            "billingCycleEnd": "2026-10-18T15:28:02.000Z",
+            "membershipType": "pro",
+            "individualUsage": [
+                "plan": [
+                    "used": 500,
+                    "limit": 2000,
+                    "autoPercentUsed": 1.11,
+                    "apiPercentUsed": 0,
+                    "totalPercentUsed": 1.06,
+                ]
+            ],
+        ]
+        let windows = CursorBudget.windows(fromSummary: summary)
+        check(windows.map(\.label) == ["month", "month (Auto)"], "a 0% API row must stay hidden")
+        check(close(windows[0].spentUSD, 5), "500 included cents is $5, not $500")
+        check(close(windows[0].budgetUSD, 20), "a 2000-cent Pro limit is $20")
+        check(!CursorBudget.isPlaceholderSummary(summary), "a Pro cycle with a limit is a real reading")
+        check(
+            CursorBudget.isPlaceholderSummary([
+                "membershipType": "free",
+                "individualUsage": ["plan": ["used": 0, "limit": 0]],
+            ]),
+            "a free empty cycle is a leftover login, not the Pro quota"
+        )
+    }
+
+    private static func testCursorSessionCookieIsBuiltFromJWT() {
+        let payload = try! JSONSerialization.data(withJSONObject: ["sub": "auth0|user_01ABC", "exp": 1_790_233_892])
+        let segment = payload.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let jwt = "header.\(segment).signature"
+        let session = CursorCredential.session(from: jwt)
+        check(
+            session?.cookie == "auth0|user_01ABC%3A%3A\(jwt)",
+            "a local JWT must become the dashboard cookie"
+        )
+        check(
+            CursorCredential.session(from: "auth0|user_01ABC::\(jwt)")?.jwt == jwt,
+            "a pasted sub::jwt must yield the JWT"
+        )
+        check(
+            CursorCredential.session(from: "auth0|user_01ABC%3A%3A\(jwt)")?.jwt == jwt,
+            "a URL-encoded cookie paste must yield the JWT"
+        )
+        check(Fetcher.jwtPayload(jwt)?["sub"] as? String == "auth0|user_01ABC", "jwtPayload must expose claims")
+    }
+
+    private static func testCursorAPIKeyIsNotASession() {
+        check(CursorCredential.isAPIKey("crsr_abc"), "crsr_ keys are Admin/user API keys")
+        check(CursorCredential.session(from: "crsr_abc") == nil, "an API key must not be treated as a session")
+        check(!CursorCredential.isAPIKey("eyJhbGciOi.payload.sig"), "a JWT is not an API key")
+    }
+
+    private static func testCursorTeamSpendMapsCents() {
+        let members: [[String: Any]] = [
+            ["overallSpendCents": 2450.0, "monthlyLimitDollars": 40],
+        ]
+        let spend = CursorBudget.spend(fromTeamMembers: members)
+        check(close(spend?.spent, 24.5), "team spend cents must become dollars")
+        check(close(spend?.limit, 40), "a single member limit is usable as the budget")
+        let windows = CursorBudget.windows(
+            monthlySpend: 24.5,
+            monthlyBudget: 40,
+            now: date(2026, 9, 16, 12, 0, calendar: utcCalendar())
+        )
+        check(windows.map(\.label) == ["month"], "Admin spend maps to one cycle row")
+        check(close(windows[0].percent, 61.25), "$24.50 of $40 is 61.25%")
+    }
+
+    private static func testCursorRebudgetsCachedSpend() {
+        let instant = date(2026, 9, 16, 12, 0, calendar: utcCalendar())
+        var cursor = Provider(name: "Cursor")
+        cursor.loggedIn = true
+        cursor.credentialSource = .keychain
+        cursor.error = CursorBudget.missingBudgetMessage
+        cursor.windows = CursorBudget.unbudgetedWindows(monthlySpend: 8, now: instant)
+        check(cursor.needsBudget, "an unbudgeted Cursor Admin reading must suppress its empty block")
+        let report = Report(providers: [cursor], date: instant)
+        let rebudgeted = report.rebudgetingCursor(monthlyBudget: 40, now: instant)
+        let provider = rebudgeted.providers[0]
+        check(provider.ok && provider.error == nil, "setting a budget must activate a validated Cursor reading")
+        check(provider.plan == "$40/mo", "the Cursor budget must become the plan badge")
+        check(close(provider.windows[0].percent, 20), "$8 of $40 must be 20%")
+
+        var dashboard = Provider(name: "Cursor")
+        dashboard.windows = [
+            UsageWindow(label: "month", percent: 10, spentUSD: 2, budgetUSD: 20),
+            UsageWindow(label: "month (Auto)", percent: 12, model: "Auto"),
+        ]
+        let leftAlone = Report(providers: [dashboard], date: instant)
+            .rebudgetingCursor(monthlyBudget: 99, now: instant)
+        check(
+            close(leftAlone.providers[0].windows[0].percent, 10),
+            "dashboard percentages must not be rewritten by the budget field"
+        )
+    }
+
+    private static func testCursorReconnectMessages() {
+        var signedOut = Provider(name: "Cursor")
+        signedOut.error = CursorBudget.notConnectedMessage
+        signedOut.credentialSource = .cursorApp
+        check(
+            CursorCredential.reconnectMessage(for: signedOut)
+                == "Cursor is signed out — sign in, or add a key in Settings",
+            "a lost Cursor app session must point back to sign-in"
+        )
+
+        var lost = Provider(name: "Cursor")
+        lost.error = CursorBudget.notConnectedMessage
+        lost.credentialSource = .keychain
+        check(
+            CursorCredential.reconnectMessage(for: lost)
+                == "no live key — add one in Settings to reconnect",
+            "a lost Cursor key must point to Settings"
+        )
+    }
+
+    private static func testConductorCursorEnvironmentIsParsed() {
+        let processList = """
+          123 /usr/bin/something
+          456 /Users/me/Library/Application Support/com.conductor.app/bin/cursor-agent
+          789 /opt/homebrew/bin/cursor
+        """
+        check(
+            CursorCredential.conductorPIDs(in: processList) == [456],
+            "only Conductor's Cursor process qualifies"
+        )
+        let environment = "PATH=/usr/bin CURSOR_API_KEY=crsr_test OTHER_SECRET=ignore"
+        check(
+            CursorCredential.key(inProcessEnvironment: environment) == "crsr_test",
+            "the Cursor value must be extracted from a process environment"
+        )
+        check(
+            CursorCredential.key(inProcessEnvironment: "CURSOR_SESSION_TOKEN=sub::jwt.here.sig")
+                == "sub::jwt.here.sig",
+            "a session token environment value must be detected"
+        )
+    }
+
     // ----------------------------------------------------------------- //
     // What the menu bar speaks for.
     // ----------------------------------------------------------------- //
@@ -548,6 +756,7 @@ enum RegressionTests {
             ("Claude", "claude.svg"),
             ("Codex", "openai.svg"),
             ("OpenRouter", "openrouter.svg"),
+            ("Cursor", "cursor.svg"),
         ] {
             guard let directory = BrandGlyph.iconDirectory else {
                 check(false, "icon directory must resolve")
@@ -590,6 +799,10 @@ enum RegressionTests {
         check(
             close(BrandGlyph.width(for: "OpenRouter", height: 14), 14),
             "OpenRouter's compact mark must keep a square slot"
+        )
+        check(
+            close(BrandGlyph.width(for: "Cursor", height: 14), 14),
+            "Cursor's compact mark must keep a square slot"
         )
     }
 

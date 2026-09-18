@@ -14,6 +14,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var report: Report?
     @Published private(set) var isRefreshing = false
     @Published private(set) var hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+    @Published private(set) var hasSavedCursorKey = CursorKeychain.read() != nil
     @Published private(set) var statusImage: NSImage = StatusIcon.image(segments: [])
     /// Spells out both readings for whatever the item is drawn as, since the
     /// icon has room for one number and no room at all to label it.
@@ -74,6 +75,8 @@ final class UsageStore: ObservableObject {
         preferences.rememberModelLimits(report?.scopedModelLimits ?? [])
         report = report?.rebudgetingOpenRouter(
             monthlyBudget: preferences.openRouterMonthlyBudget
+        ).rebudgetingCursor(
+            monthlyBudget: preferences.cursorMonthlyBudget
         )
         redrawIcon()
 
@@ -86,6 +89,12 @@ final class UsageStore: ObservableObject {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] budget in self?.openRouterBudgetChanged(budget) }
+            .store(in: &preferenceWatches)
+
+        preferences.$cursorMonthlyBudget
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] budget in self?.cursorBudgetChanged(budget) }
             .store(in: &preferenceWatches)
 
         Publishers.CombineLatest4(
@@ -216,7 +225,8 @@ final class UsageStore: ObservableObject {
 
         let fetched = await Fetcher.fetch(
             names: names,
-            openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget
+            openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget,
+            cursorMonthlyBudget: Preferences.shared.cursorMonthlyBudget
         )
         let merged = merging(fetched, full: full, at: Date())
         Preferences.shared.rememberModelLimits(merged.scopedModelLimits)
@@ -282,6 +292,22 @@ final class UsageStore: ObservableObject {
     func removeOpenRouterKey() async -> Bool {
         let removed = OpenRouterKeychain.remove()
         hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+        if removed { await refresh() }
+        return removed
+    }
+
+    @discardableResult
+    func saveCursorKey(_ key: String) async -> Bool {
+        let saved = CursorKeychain.save(key)
+        hasSavedCursorKey = CursorKeychain.read() != nil
+        if saved { await refresh() }
+        return saved
+    }
+
+    @discardableResult
+    func removeCursorKey() async -> Bool {
+        let removed = CursorKeychain.remove()
+        hasSavedCursorKey = CursorKeychain.read() != nil
         if removed { await refresh() }
         return removed
     }
@@ -371,7 +397,9 @@ final class UsageStore: ObservableObject {
                 source: "\($0.provider.name) \($0.window.label)",
                 window: $0.window,
                 explains: false,
-                showsCost: preferences.showOpenRouterCosts,
+                showsCost: $0.provider.name == "Cursor"
+                    ? preferences.showCursorCosts
+                    : preferences.showOpenRouterCosts,
                 timing: timing
             )
         }
@@ -405,6 +433,14 @@ final class UsageStore: ObservableObject {
     private func openRouterBudgetChanged(_ budget: Double?) {
         guard let current = report else { return }
         let updated = current.rebudgetingOpenRouter(monthlyBudget: budget)
+        report = updated
+        write(updated)
+        redrawIcon()
+    }
+
+    private func cursorBudgetChanged(_ budget: Double?) {
+        guard let current = report else { return }
+        let updated = current.rebudgetingCursor(monthlyBudget: budget)
         report = updated
         write(updated)
         redrawIcon()

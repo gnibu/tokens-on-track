@@ -103,6 +103,13 @@ private struct SettingsTab: View {
     @State private var openRouterBudgetText = Preferences.shared.openRouterMonthlyBudget
         .map(SettingsTab.editableBudget)
         ?? ""
+    @State private var editingCursorKey = false
+    @State private var cursorKey = ""
+    @State private var cursorKeyError: String?
+    @State private var cursorBudgetError: String?
+    @State private var cursorBudgetText = Preferences.shared.cursorMonthlyBudget
+        .map(SettingsTab.editableBudget)
+        ?? ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -113,6 +120,7 @@ private struct SettingsTab: View {
                     menuBarGroup
                     displayGroup
                     openRouterGroup
+                    cursorGroup
                     providersGroup
                     workingHoursGroup
                     alertsGroup
@@ -426,6 +434,196 @@ private struct SettingsTab: View {
         }
         openRouterBudgetError = nil
         preferences.openRouterMonthlyBudget = budget
+    }
+
+    private var cursorGroup: some View {
+        Group {
+            groupTitle("Cursor")
+
+            DividedRows {
+                SettingRow(
+                    title: "Connection",
+                    subtitle: cursorConnectionSubtitle
+                ) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(cursorConnectionColor)
+                            .frame(width: 6, height: 6)
+                        Text(cursorConnectionLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Glass.ink(0.72))
+                    }
+                }
+
+                SettingRow(
+                    title: "API key",
+                    subtitle: cursorKeyError ?? (store.hasSavedCursorKey
+                        ? "saved in this Mac's Keychain"
+                        : "team Admin key, session token, or leave empty for the Cursor app")
+                ) {
+                    if editingCursorKey {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            SecureField("crsr_…", text: $cursorKey)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11).monospaced())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .frame(width: 150)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(Color.black.opacity(0.25))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.14))
+                                )
+
+                            HStack(spacing: 10) {
+                                GlassLink(title: "Cancel") {
+                                    editingCursorKey = false
+                                    cursorKey = ""
+                                    cursorKeyError = nil
+                                }
+                                GlassButton(label: "Save", enabled: !cursorKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                    saveCursorKey()
+                                }
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            if store.hasSavedCursorKey {
+                                GlassLink(title: "Remove") {
+                                    Task {
+                                        if await store.removeCursorKey() {
+                                            cursorKeyError = nil
+                                        } else {
+                                            cursorKeyError = "Could not remove the key from Keychain"
+                                        }
+                                    }
+                                }
+                            }
+                            GlassButton(label: store.hasSavedCursorKey ? "Replace…" : "Add key…") {
+                                editingCursorKey = true
+                                cursorKeyError = nil
+                            }
+                        }
+                    }
+                }
+
+                SettingRow(
+                    title: "Monthly budget",
+                    subtitle: cursorBudgetError ?? "USD · only needed for a team Admin key without a spend limit"
+                ) {
+                    HStack(spacing: 4) {
+                        Text("$")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Glass.ink(0.55))
+                        TextField("20", text: $cursorBudgetText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12).monospacedDigit())
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 64)
+                            .onChange(of: cursorBudgetText) { _, value in
+                                setCursorBudget(value)
+                            }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.black.opacity(0.25))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14))
+                    )
+                }
+
+                SettingRow(
+                    title: "Dollar values",
+                    subtitle: "show spend and allowance below each usage row"
+                ) {
+                    GlassSwitch(isOn: $preferences.showCursorCosts)
+                        .onChange(of: preferences.showCursorCosts) { _, _ in
+                            store.iconPreferenceChanged()
+                        }
+                }
+            }
+        }
+    }
+
+    private var cursorProvider: Provider? {
+        store.report?.providers.first(where: { $0.name == "Cursor" })
+    }
+
+    private var isCursorConnected: Bool {
+        guard let provider = cursorProvider, provider.credentialSource != nil else {
+            return false
+        }
+        return provider.error != CursorBudget.notConnectedMessage
+    }
+
+    private var cursorConnectionLabel: String {
+        guard isCursorConnected else { return "Not connected" }
+        if cursorProvider?.error?.contains("rejected") == true
+            || cursorProvider?.error == CursorBudget.userKeyMessage
+        {
+            return "Rejected"
+        }
+        return "Connected"
+    }
+
+    private var cursorConnectionSubtitle: String {
+        guard let provider = cursorProvider else {
+            return "Uses the signed-in Cursor app, or add a key below"
+        }
+        var parts: [String] = []
+        if let source = provider.credentialSource { parts.append(source.rawValue) }
+        if let error = provider.error, error != CursorBudget.missingBudgetMessage {
+            parts.append(error)
+        }
+        return parts.isEmpty
+            ? "Uses the signed-in Cursor app, or add a key below"
+            : parts.joined(separator: " · ")
+    }
+
+    private var cursorConnectionColor: Color {
+        guard isCursorConnected else { return Color.white.opacity(0.3) }
+        if cursorProvider?.error?.contains("rejected") == true
+            || cursorProvider?.error == CursorBudget.userKeyMessage
+        {
+            return Pace.warn
+        }
+        return Pace.good
+    }
+
+    private func saveCursorKey() {
+        let key = cursorKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            if await store.saveCursorKey(key) {
+                editingCursorKey = false
+                cursorKey = ""
+                cursorKeyError = nil
+            } else {
+                cursorKeyError = "Could not save the key in Keychain"
+            }
+        }
+    }
+
+    private func setCursorBudget(_ text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            preferences.cursorMonthlyBudget = nil
+            cursorBudgetError = nil
+            return
+        }
+        let normalized = value.replacingOccurrences(of: ",", with: ".")
+        guard let budget = Double(normalized), budget.isFinite, budget > 0 else {
+            cursorBudgetError = "Enter a positive USD amount"
+            return
+        }
+        cursorBudgetError = nil
+        preferences.cursorMonthlyBudget = budget
     }
 
     /// Show/hide each set-up provider and its model-specific rows. Only the

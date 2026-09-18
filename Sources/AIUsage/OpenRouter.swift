@@ -115,6 +115,7 @@ enum OpenRouterCredential {
         case openCode = "OpenCode"
         case environment = "Environment"
         case conductor = "Conductor · while OpenCode runs"
+        case cursorApp = "Cursor app"
     }
 
     struct Candidate: Equatable {
