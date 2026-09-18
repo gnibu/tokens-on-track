@@ -24,7 +24,7 @@ Claude                             MAX
 week        ▓▓▓▓┃──────   22%  Sat 21:00
 Codex                              PRO
 week        ▓───┃──────    3%  Mon 08:34
-spark week  ▓───┃──────    1%  Mon 08:36
+week (Spark)▓───┃──────    1%  Mon 08:36
 OpenRouter                       $20/MO
 day         ▓▓──┃──────   16%     00:00
 month       ▓───┃──────    1%  Wed 00:00
@@ -69,8 +69,8 @@ can widen it to as many as four windows, which are simply the busiest ones — t
 Claude owns the two busiest. Tick *Always keep every provider on screen* to hand
 each provider a slot first instead, so a quiet Codex stays visible beside a loud
 Claude at the cost of bumping a window that really is busier. The window's
-initial sits in the hole of the ring (`w` week, `h` 5-hour, `s` spark week),
-which is the one place a menu bar has room to spare. Click it for the dropdown.
+initial sits in the hole of the ring (`w` week, `h` 5-hour), which is the one
+place a menu bar has room to spare. Click it for the dropdown.
 
 **Dropdown.** Two tabs on a pane of glass. *Usage* leads with one line saying
 whether you are fine — "On target everywhere", or how far above the target
@@ -169,8 +169,11 @@ Which windows appear depends on what each API returns for your plan:
 
 - Claude reports `five_hour` and `seven_day`.
 - Codex reports a primary window, an optional secondary one, and any
-  model-specific buckets from `additional_rate_limits` (e.g. GPT-5.3-Codex-Spark)
-  as their own row. On Pro today only weekly windows come back —
+  named model-specific buckets from `additional_rate_limits` (for example,
+  `GPT-5.3-Codex-Spark`) as their own compact rows, such as `week (Spark)`.
+  Newly discovered models are shown by default and get one switch in Settings;
+  the app remembers that switch even when a later response omits the model.
+  On Pro today only weekly windows come back —
   `secondary_window` is `null`. If a 5-hour window reappears it is rendered with
   no change.
 - OpenRouter reports dollar spend. Enter one monthly budget in Settings; the
@@ -272,7 +275,9 @@ cd tokens-on-track
 
 That compiles, wraps the binary in `Tokens on Track.app`, ad-hoc signs it, copies
 it to `/Applications` and launches it. Drop `--install` to build into `.build/`
-and leave `/Applications` alone.
+and leave `/Applications` alone. The footer identifies source builds using
+Git's standard descriptive form, such as `v1.1.2-3-gabc1234-dirty`; a published
+build shows only its exact release version.
 
 **Requirements:** macOS 14+ and Command Line Tools (`xcode-select --install`).
 Full Xcode is *not* needed; there is no `.xcodeproj`, `build.sh` assembles the

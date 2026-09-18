@@ -1,19 +1,27 @@
 # Changelog
 
 Notable changes, newest first. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions match the
-git tags and `CFBundleShortVersionString`. Each release is also published with
-generated notes on the [releases page](https://github.com/gnibu/tokens-on-track/releases).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions
+match the git tags and `CFBundleShortVersionString`. Each release is also
+published with generated notes on the
+[releases page](https://github.com/gnibu/tokens-on-track/releases).
 
 ## [Unreleased]
 
 ### Added
 
+- Claude and Codex model-specific quota rows, such as `week (Fable)` and
+  `week (Spark)`, discovered from provider responses. Each discovered model is
+  shown by default, remembered across responses that omit it, and can be hidden
+  across every surface from Settings.
 - A refresh button on the desktop card, and a spinner on both refresh buttons
   while a poll is in flight.
 
 ### Changed
 
+- Development builds display the preceding release, commit distance, short Git
+  SHA and dirty state; published app, bundle, DMG and tag versions are stamped
+  from one implementation.
 - The default refresh interval is 10 minutes (was 15), and 10 is now a
   selectable interval alongside 5, 15, 30 and 60.
 - A poll that lands nothing now says the app keeps retrying by itself, instead

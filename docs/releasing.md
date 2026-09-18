@@ -5,6 +5,14 @@ network. `release.py` is the shipping loop: a universal binary, a Developer ID
 signature, notarization, and a stapled `.dmg` that opens on a stranger's Mac
 without a Gatekeeper warning.
 
+Git tags are the version source. A development build describes its exact
+worktree, for example `1.1.2-3-gabc1234` for the third commit after `v1.1.2`,
+or `1.1.2-3-gabc1234-dirty` when it has uncommitted edits. A clean checkout at
+an exact tag displays only that release (`1.1.3`). Apple's
+`CFBundleShortVersionString` remains numeric, while `CFBundleVersion` is the
+monotonic commit count; the descriptive version is stored separately for the
+in-app footer.
+
 Once per machine:
 
 ```sh
@@ -16,9 +24,8 @@ notary credentials in the keychain, checks your backup of the signing key is
 really encrypted, and writes a `.env`. It is re-runnable and skips whatever is
 already done.
 
-Then, per release — bump `CFBundleShortVersionString` and `CFBundleVersion` in
-`Resources/Info.plist`, merge that change, and publish from the exact current
-`origin/main` commit, since both versions are read from the plist:
+Then, per release, merge the intended changes and publish from the exact current
+`origin/main` commit:
 
 ```sh
 ./release.py                # dist/TokensOnTrack-<version>.dmg
@@ -43,10 +50,15 @@ dmg attached and generated notes. Publishing from a pull-request branch is
 deliberately rejected even when it has been pushed: the repository uses
 squash merges, so a tag made before the merge would live on parallel history
 and GitHub would generate misleading release notes. The other preconditions —
-`gh` installed and authenticated, the version bumped to something not already
-tagged, and a clean tree — are also checked before the build starts rather
-than after, so a stale version number costs a second instead of two compiles
-and two trips through Apple's notary queue.
+`gh` installed and authenticated, a clean tree, and a release tag that does not
+already exist — are also checked before the build starts rather than after.
+
+Routine patch releases require no source version edit. `TOTReleaseTrain` in
+`Resources/Info.plist` is the only manual version knob and contains just
+`major.minor`; change it only when starting a new major or minor train. The
+release script chooses the next patch after the highest matching local or
+published tag, then stamps that same exact version into the app, DMG name,
+volume name, Git tag, GitHub release title, and in-app footer.
 
 No arguments and no environment needed: the signing identity is auto-detected
 from the keychain, and the notary password never leaves it. `.env` (see

@@ -19,14 +19,14 @@ final class UsageStore: ObservableObject {
     /// icon has room for one number and no room at all to label it.
     @Published private(set) var statusTooltip: String = "Tokens on Track — no reading yet"
 
-    static var stateDirectory: URL {
+    nonisolated static var stateDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["AI_USAGE_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
         return URL(fileURLWithPath: ("~/.local/share/ai-usage" as NSString).expandingTildeInPath)
     }
 
-    static var cacheURL: URL { stateDirectory.appendingPathComponent("usage.json") }
+    nonisolated static var cacheURL: URL { stateDirectory.appendingPathComponent("usage.json") }
 
     /// How quickly to come back after a poll could not reach anyone. The
     /// user's interval otherwise; a minute is short enough that coming back
@@ -71,6 +71,7 @@ final class UsageStore: ObservableObject {
         let preferences = Preferences.shared
         workSchedule = preferences.workSchedule
         loadCache()
+        preferences.rememberModelLimits(report?.scopedModelLimits ?? [])
         report = report?.rebudgetingOpenRouter(
             monthlyBudget: preferences.openRouterMonthlyBudget
         )
@@ -155,10 +156,10 @@ final class UsageStore: ObservableObject {
         let timing = timing ?? Pace.Timing(schedule: workSchedule)
         let preferences = Preferences.shared
         // The bar draws from the same filtered set as the card, so hiding a
-        // provider or the spark rows clears them from the menu bar too.
+        // provider or model-specific rows clears them from the menu bar too.
         return report.displaying(
             hiding: preferences.hiddenProviders,
-            hidingSpark: preferences.hiddenSpark
+            hidingModels: preferences.hiddenModelLimits
         ).busiestWindows(
             limit: limit,
             fairShare: preferences.menuBarFairShare,
@@ -218,6 +219,7 @@ final class UsageStore: ObservableObject {
             openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget
         )
         let merged = merging(fetched, full: full, at: Date())
+        Preferences.shared.rememberModelLimits(merged.scopedModelLimits)
         report = merged
         // Remember the expiry of any token just rejected, so the next wake can
         // tell a freshly-minted token apart from the same stale one.

@@ -3,6 +3,8 @@ set -eu
 
 cd "$(dirname "$0")"
 
+xcrun python3 -m unittest Tests/test_versioning.py
+
 TEST_BINARY=".build/AIUsageRegressionTests"
 mkdir -p .build
 

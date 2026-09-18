@@ -81,19 +81,93 @@ enum Fetcher {
             return provider
         }
 
-        // The endpoint reports the bucket but not its length, and both are fixed.
-        for (key, label, length) in [("five_hour", "5h", 5 * 3600), ("seven_day", "week", 7 * 86400)] {
-            guard let block = data[key] as? [String: Any] else { continue }
-            provider.windows.append(UsageWindow(
+        provider.windows = claudeWindows(data)
+        provider.ok = !provider.windows.isEmpty
+        if !provider.ok { provider.error = "no limit data" }
+        return provider
+    }
+
+    /// Turn Claude's current structured `limits` list into ordinary windows.
+    /// Model names and future groups come from the response rather than a list
+    /// in the app. The two legacy blocks fill any base rows omitted by an older
+    /// or partially rolled-out response.
+    static func claudeWindows(_ data: [String: Any]) -> [UsageWindow] {
+        var windows: [UsageWindow] = []
+        var baseGroups = Set<String>()
+        var seen = Set<String>()
+
+        for limit in (data["limits"] as? [[String: Any]]) ?? [] {
+            guard let percent = (limit["percent"] as? NSNumber)?.doubleValue,
+                  percent.isFinite,
+                  let rawGroup = (limit["group"] as? String) ?? (limit["kind"] as? String)
+            else { continue }
+
+            let group = rawGroup.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !group.isEmpty else { continue }
+            let descriptor = claudeGroup(group)
+            let model = claudeModelName(limit["scope"])
+            let unique = group + "\u{1}" + (model?.lowercased() ?? "")
+            guard seen.insert(unique).inserted else { continue }
+            if model == nil { baseGroups.insert(group) }
+
+            windows.append(UsageWindow(
+                label: descriptor.label + (model.map { " (\($0))" } ?? ""),
+                percent: percent,
+                resetsAt: epoch(fromISO: limit["resets_at"] as? String),
+                windowSeconds: descriptor.seconds,
+                model: model
+            ))
+        }
+
+        // These fields are still present today and keep the app compatible
+        // with older responses. They are only fallbacks, never duplicate rows.
+        for (key, group, label, length) in [
+            ("five_hour", "session", "5h", 5 * 3600),
+            ("seven_day", "weekly", "week", 7 * 86400),
+        ] where !baseGroups.contains(group) {
+            guard let block = data[key] as? [String: Any],
+                  let percent = (block["utilization"] as? NSNumber)?.doubleValue,
+                  percent.isFinite
+            else { continue }
+            windows.append(UsageWindow(
                 label: label,
-                percent: (block["utilization"] as? NSNumber)?.doubleValue ?? 0,
+                percent: percent,
                 resetsAt: epoch(fromISO: block["resets_at"] as? String),
                 windowSeconds: length
             ))
         }
-        provider.ok = !provider.windows.isEmpty
-        if !provider.ok { provider.error = "no limit data" }
-        return provider
+
+        // Shortest first, with an overall row immediately before its scoped
+        // peers. Swift's sort is not stable, so retain response order as the
+        // final tie-breaker.
+        return windows.enumerated().sorted { lhs, rhs in
+            let left = (lhs.element.windowSeconds ?? Int.max, lhs.element.model == nil ? 0 : 1, lhs.offset)
+            let right = (rhs.element.windowSeconds ?? Int.max, rhs.element.model == nil ? 0 : 1, rhs.offset)
+            return left < right
+        }.map(\.element)
+    }
+
+    private static func claudeGroup(_ group: String) -> (label: String, seconds: Int?) {
+        switch group {
+        case "session": return ("5h", 5 * 3600)
+        case "daily": return ("day", 86_400)
+        case "weekly": return ("week", 7 * 86_400)
+        case "monthly": return ("month", nil)
+        case "yearly", "annual": return ("year", nil)
+        default:
+            return (group.replacingOccurrences(of: "_", with: " "), nil)
+        }
+    }
+
+    private static func claudeModelName(_ rawScope: Any?) -> String? {
+        guard let scope = rawScope as? [String: Any],
+              let model = scope["model"] as? [String: Any]
+        else { return nil }
+        let raw = (model["display_name"] as? String) ?? (model["id"] as? String)
+        guard let name = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return nil
+        }
+        return name
     }
 
     // ----------------------------------------------------------------- //
@@ -137,14 +211,7 @@ enum Fetcher {
 
         provider.plan = data["plan_type"] as? String
         provider.windows += codexWindows(data["rate_limit"])
-
-        // Model-specific buckets (e.g. GPT-5.3-Codex-Spark) live in their own
-        // list and are billed separately from the main quota.
-        for extra in (data["additional_rate_limits"] as? [[String: Any]]) ?? [] {
-            let name = (extra["limit_name"] as? String) ?? "extra"
-            let short = (name.split(separator: "-").last.map(String.init) ?? name).lowercased()
-            provider.windows += codexWindows(extra["rate_limit"], prefix: "\(short) ")
-        }
+        provider.windows += codexAdditionalWindows(data["additional_rate_limits"])
 
         provider.ok = !provider.windows.isEmpty
         if !provider.ok { provider.error = "no limit data" }
@@ -152,17 +219,37 @@ enum Fetcher {
     }
 
     /// Turn one Codex rate_limit block into rows, shortest window first.
-    private static func codexWindows(_ limits: Any?, prefix: String = "") -> [UsageWindow] {
+    /// Parse every named model bucket Codex sends. Unknown names are kept in
+    /// structured metadata while the final name segment keeps labels compact.
+    static func codexAdditionalWindows(_ raw: Any?) -> [UsageWindow] {
+        guard let limits = raw as? [[String: Any]] else { return [] }
+        return limits.flatMap { extra -> [UsageWindow] in
+            guard let rawName = extra["limit_name"] as? String else { return [] }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return [] }
+            return codexWindows(extra["rate_limit"], model: name)
+        }
+    }
+
+    private static func codexWindows(_ limits: Any?, model: String? = nil) -> [UsageWindow] {
         guard let limits = limits as? [String: Any] else { return [] }
         var out: [UsageWindow] = []
         for key in ["primary_window", "secondary_window"] {
-            guard let block = limits[key] as? [String: Any] else { continue }
+            guard let block = limits[key] as? [String: Any],
+                  let percent = (block["used_percent"] as? NSNumber)?.doubleValue,
+                  percent.isFinite
+            else { continue }
             let length = (block["limit_window_seconds"] as? NSNumber)?.intValue
+            let baseLabel = windowLabel(length)
+            let label = model.map {
+                "\(baseLabel) (\(ScopedModelLimit.displayName(provider: "Codex", model: $0)))"
+            } ?? baseLabel
             out.append(UsageWindow(
-                label: prefix + windowLabel(length),
-                percent: (block["used_percent"] as? NSNumber)?.doubleValue ?? 0,
+                label: label,
+                percent: percent,
                 resetsAt: (block["reset_at"] as? NSNumber)?.intValue,
-                windowSeconds: length
+                windowSeconds: length,
+                model: model
             ))
         }
         return out.sorted { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? 0) }

@@ -12,9 +12,18 @@ enum RegressionTests {
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()
         testProcessIsTerminatedAtTimeout()
+        testClaudeLimitsAreParsedGenerically()
+        testClaudeLegacyLimitsRemainFallback()
+        testClaudeMalformedLimitsAreSkipped()
+        testCodexAdditionalLimitsAreParsedGenerically()
+        testCodexMalformedAdditionalLimitsAreSkipped()
+        testProviderSpecificModelDisplayNames()
+        testCodexSparkPreferencesMigrateToModelVisibility()
+        testModelLimitHistoryRemembersPastModels()
+        testModelLimitHistorySeedsSparkForExistingInstalls()
         testOpenRouterBuildsBudgetWindows()
         testOpenRouterUsesLeapMonth()
-        testOpenRouterWindowMetadataRoundTrips()
+        testWindowMetadataRoundTrips()
         testOpenRouterRebudgetsCachedSpend()
         testOpenCodeOpenRouterCredentialIsParsed()
         testConductorCredentialEnvironmentIsParsed()
@@ -28,7 +37,8 @@ enum RegressionTests {
         testMenuBarItemIsNeverZeroWidth()
         testStrayArgumentAfterCloseIsRejected()
         testNotLoggedInProviderIsHidden()
-        testHiddenProviderAndSparkWindowsAreFiltered()
+        testHiddenProviderIsFiltered()
+        testHiddenScopedModelLimitsAreFiltered()
         testRecentlyActiveProviderStaysVisibleWhenUnreadable()
         testFailedPollKeepsTheLastReading()
         testCarriedReadingIsDroppedOnceItIsOld()
@@ -104,6 +114,228 @@ enum RegressionTests {
     }
 
     // ----------------------------------------------------------------- //
+    // Claude's structured limits include model-scoped rows.
+    // ----------------------------------------------------------------- //
+
+    private static func testClaudeLimitsAreParsedGenerically() {
+        let data: [String: Any] = [
+            "limits": [
+                [
+                    "kind": "session",
+                    "group": "session",
+                    "percent": 64,
+                    "resets_at": "2026-09-18T10:50:00+00:00",
+                    "scope": NSNull(),
+                ],
+                [
+                    "kind": "weekly_all",
+                    "group": "weekly",
+                    "percent": 81,
+                    "resets_at": "2026-09-19T18:59:59+00:00",
+                    "scope": NSNull(),
+                ],
+                [
+                    "kind": "weekly_scoped",
+                    "group": "weekly",
+                    "percent": 71,
+                    "resets_at": "2026-09-19T18:59:59+00:00",
+                    "scope": [
+                        "model": ["id": NSNull(), "display_name": "Fable"],
+                        "surface": NSNull(),
+                    ],
+                ],
+            ],
+        ]
+
+        let windows = Fetcher.claudeWindows(data)
+        check(
+            windows.map(\.label) == ["5h", "week", "week (Fable)"],
+            "Claude limits must retain the base rows and name any scoped model"
+        )
+        check(windows.map(\.percent) == [64, 81, 71], "Claude limit percentages must be preserved")
+        check(windows[2].model == "Fable", "the scoped model must remain structured metadata")
+        check(windows[2].windowSeconds == 7 * 86_400, "a scoped weekly row must keep weekly pacing")
+    }
+
+    private static func testClaudeLegacyLimitsRemainFallback() {
+        let data: [String: Any] = [
+            "five_hour": [
+                "utilization": 12,
+                "resets_at": "2026-09-18T10:50:00+00:00",
+            ],
+            "seven_day": [
+                "utilization": 34,
+                "resets_at": "2026-09-19T18:59:59+00:00",
+            ],
+        ]
+
+        let windows = Fetcher.claudeWindows(data)
+        check(windows.map(\.label) == ["5h", "week"], "legacy Claude responses must still produce both rows")
+        check(windows.map(\.percent) == [12, 34], "legacy utilization values must be preserved")
+        check(windows.allSatisfy { $0.model == nil }, "legacy rows must stay unscoped")
+    }
+
+    private static func testClaudeMalformedLimitsAreSkipped() {
+        let data: [String: Any] = [
+            "five_hour": ["utilization": 9],
+            "seven_day": ["utilization": 18],
+            "limits": [
+                ["kind": "weekly_all", "group": "weekly"],
+                ["kind": "weekly_scoped", "group": "weekly", "percent": "not a number"],
+                ["kind": "monthly_scoped", "group": "monthly", "percent": 25,
+                 "scope": ["model": ["display_name": "Future"]]],
+            ],
+        ]
+
+        let windows = Fetcher.claudeWindows(data)
+        check(
+            windows.map(\.label) == ["5h", "week", "month (Future)"],
+            "malformed structured rows must be skipped while valid future groups stay visible"
+        )
+        check(windows.last?.windowSeconds == nil, "an unknown limit group must not invent a pacing duration")
+    }
+
+    private static func testCodexAdditionalLimitsAreParsedGenerically() {
+        let additional: [[String: Any]] = [
+            [
+                "limit_name": "GPT-5.3-Codex-Spark",
+                "rate_limit": [
+                    "primary_window": [
+                        "used_percent": 12,
+                        "reset_at": 1_790_000_000,
+                        "limit_window_seconds": 18_000,
+                    ],
+                    "secondary_window": [
+                        "used_percent": 34,
+                        "reset_at": 1_790_500_000,
+                        "limit_window_seconds": 604_800,
+                    ],
+                ],
+            ],
+            [
+                "limit_name": "Codex-Research",
+                "rate_limit": [
+                    "secondary_window": [
+                        "used_percent": 56,
+                        "reset_at": 1_790_500_000,
+                        "limit_window_seconds": 604_800,
+                    ],
+                ],
+            ],
+        ]
+
+        let windows = Fetcher.codexAdditionalWindows(additional)
+        check(
+            windows.map(\.label) == ["5h (Spark)", "week (Spark)", "week (Research)"],
+            "every named Codex additional limit must produce compact model-scoped rows"
+        )
+        check(
+            windows.map(\.model) == [
+                "GPT-5.3-Codex-Spark",
+                "GPT-5.3-Codex-Spark",
+                "Codex-Research",
+            ],
+            "Codex rows must preserve each complete API limit name as metadata"
+        )
+    }
+
+    private static func testCodexMalformedAdditionalLimitsAreSkipped() {
+        let additional: [[String: Any]] = [
+            ["rate_limit": ["primary_window": ["used_percent": 10]]],
+            ["limit_name": "   ", "rate_limit": ["primary_window": ["used_percent": 20]]],
+            ["limit_name": "Codex-Valid", "rate_limit": NSNull()],
+        ]
+        check(
+            Fetcher.codexAdditionalWindows(additional).isEmpty,
+            "unnamed or malformed Codex additional limits must be skipped"
+        )
+    }
+
+    private static func testProviderSpecificModelDisplayNames() {
+        check(
+            ScopedModelLimit(provider: "Codex", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
+            "Codex limit names must retain their compact final segment"
+        )
+        check(
+            ScopedModelLimit(provider: "Claude", model: "claude-fable-5-1").displayName
+                == "claude-fable-5-1",
+            "a Claude raw model ID must match the name shown in its usage row"
+        )
+    }
+
+    private static func testCodexSparkPreferencesMigrateToModelVisibility() {
+        let spark = ScopedModelLimit.key(provider: "Codex", model: ModelLimitMigration.codexSpark)
+        let existing = Set([ScopedModelLimit.key(provider: "Claude", model: "Fable")])
+
+        let hidden = ModelLimitMigration.codexSparkVisibility(
+            existing: existing,
+            hadPreviousReading: true,
+            legacySessionHidden: nil,
+            legacyWeekHidden: nil,
+            legacyAllHidden: nil
+        )
+        check(hidden.contains(spark), "an existing install with both default-hidden Spark rows must keep Spark hidden")
+        check(existing.isSubset(of: hidden), "migration must retain existing model choices")
+
+        let mixed = ModelLimitMigration.codexSparkVisibility(
+            existing: existing,
+            hadPreviousReading: true,
+            legacySessionHidden: true,
+            legacyWeekHidden: false,
+            legacyAllHidden: nil
+        )
+        check(!mixed.contains(spark), "a mixed legacy Spark state must become shown under one unified switch")
+
+        let fresh = ModelLimitMigration.codexSparkVisibility(
+            existing: existing,
+            hadPreviousReading: false,
+            legacySessionHidden: nil,
+            legacyWeekHidden: nil,
+            legacyAllHidden: nil
+        )
+        check(!fresh.contains(spark), "a fresh install must show newly discovered Spark limits")
+    }
+
+    private static func testModelLimitHistoryRemembersPastModels() {
+        let spark = ScopedModelLimit(provider: "Codex", model: "GPT-5.3-Codex-Spark")
+        let fable = ScopedModelLimit(provider: "Claude", model: "Fable")
+        let duplicateSpark = ScopedModelLimit(provider: "codex", model: "gpt-5.3-codex-spark")
+
+        let discovered = ModelLimitHistory.merging(
+            existing: [spark],
+            discovered: [fable, duplicateSpark]
+        )
+        check(
+            discovered == [spark, fable],
+            "model history must append new discoveries once while preserving names and order"
+        )
+        check(
+            ModelLimitHistory.merging(existing: discovered, discovered: []) == discovered,
+            "a response that omits model limits must not erase previously discovered models"
+        )
+
+        guard let data = try? JSONEncoder().encode(discovered),
+              let restored = try? JSONDecoder().decode([ScopedModelLimit].self, from: data)
+        else {
+            check(false, "model history must encode and decode")
+            return
+        }
+        check(restored == discovered, "persisted model history must retain provider and model names")
+    }
+
+    private static func testModelLimitHistorySeedsSparkForExistingInstalls() {
+        let existing = ModelLimitHistory.seedingSpark(existing: [], hadPreviousReading: true)
+        check(
+            existing == [ScopedModelLimit(provider: "Codex", model: ModelLimitMigration.codexSpark)],
+            "an existing installation must keep the previously available Spark setting"
+        )
+        check(
+            ModelLimitHistory.seedingSpark(existing: [], hadPreviousReading: false).isEmpty,
+            "a fresh installation must not invent a model it has never observed"
+        )
+    }
+
+    // ----------------------------------------------------------------- //
     // OpenRouter spend becomes ordinary quota windows.
     // ----------------------------------------------------------------- //
 
@@ -147,14 +379,15 @@ enum RegressionTests {
         check(windows[1].windowSeconds == 29 * 86_400, "February 2028 must contain 29 UTC days")
     }
 
-    private static func testOpenRouterWindowMetadataRoundTrips() {
+    private static func testWindowMetadataRoundTrips() {
         let original = UsageWindow(
             label: "day",
             percent: 25,
             resetsAt: 123,
             windowSeconds: 86_400,
             spentUSD: 0.25,
-            budgetUSD: 1
+            budgetUSD: 1,
+            model: "Fable"
         )
         guard let encoded = try? JSONEncoder().encode(original),
               let restored = try? JSONDecoder().decode(UsageWindow.self, from: encoded)
@@ -162,11 +395,14 @@ enum RegressionTests {
             check(false, "an OpenRouter window must encode and decode")
             return
         }
-        check(restored == original, "USD metadata must survive the usage cache")
+        check(restored == original, "window metadata must survive the usage cache")
 
         let old = Data(#"{"label":"week","percent":42}"#.utf8)
         let legacy = try? JSONDecoder().decode(UsageWindow.self, from: old)
-        check(legacy?.spentUSD == nil && legacy?.budgetUSD == nil, "old caches must decode without USD metadata")
+        check(
+            legacy?.spentUSD == nil && legacy?.budgetUSD == nil && legacy?.model == nil,
+            "old caches must decode without optional window metadata"
+        )
     }
 
     private static func testOpenRouterRebudgetsCachedSpend() {
@@ -402,7 +638,7 @@ enum RegressionTests {
         // which says nothing about the window at all.
         check(StatusIcon.windowInitial("5h") == "h", "5h must be marked h")
         check(StatusIcon.windowInitial("week") == "w", "week must be marked w")
-        check(StatusIcon.windowInitial("spark week") == "s", "spark week must be marked s")
+        check(StatusIcon.windowInitial("week (Spark)") == "w", "a scoped week must retain the week initial")
         check(StatusIcon.windowInitial("30") == nil, "a label with no letters gets no mark")
     }
 
@@ -419,33 +655,38 @@ enum RegressionTests {
         )
     }
 
-    private static func testHiddenProviderAndSparkWindowsAreFiltered() {
-        var codex = provider(name: "Codex", windows: [
-            window(percent: 10, elapsedPercent: 50),
-        ])
-        codex.windows.append(UsageWindow(label: "spark 5h", percent: 0, resetsAt: nil, windowSeconds: 5 * 3600))
-        codex.windows.append(UsageWindow(label: "spark week", percent: 0, resetsAt: nil, windowSeconds: 7 * 86400))
+    private static func testHiddenProviderIsFiltered() {
+        let codex = provider(name: "Codex", windows: [window(percent: 10, elapsedPercent: 50)])
         let claude = provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])
         let report = Report(providers: [claude, codex], date: now)
 
-        check(
-            report.hasSparkSession && report.hasSparkWeekly,
-            "each spark bucket must be detectable for its own settings switch"
-        )
-
-        let hidClaude = report.displayProviders(hiding: ["Claude"], hidingSpark: .none)
+        let hidClaude = report.displayProviders(hiding: ["Claude"])
         check(hidClaude.map(\.name) == ["Codex"], "a hidden provider must be dropped")
+    }
 
-        let noSession = report.displayProviders(hidingSpark: HiddenSpark(session: true))
-        let sessionRows = noSession.first { $0.name == "Codex" }?.windows.map(\.label)
-        check(
-            sessionRows == ["10.0", "spark week"],
-            "hiding the session row must keep the weekly spark row"
+    private static func testHiddenScopedModelLimitsAreFiltered() {
+        var claude = provider(name: "Claude", windows: [
+            UsageWindow(label: "week", percent: 81, windowSeconds: 7 * 86_400),
+            UsageWindow(label: "week (Fable)", percent: 71, windowSeconds: 7 * 86_400, model: "Fable"),
+            UsageWindow(label: "month (Future)", percent: 25, model: "Future"),
+        ])
+        // Preserve a duplicate model row to prove one model switch controls
+        // every scoped window for that model, not just a single label.
+        claude.windows.append(
+            UsageWindow(label: "5h (Fable)", percent: 30, windowSeconds: 5 * 3600, model: "Fable")
         )
+        let report = Report(providers: [claude], date: now)
+        let fable = ScopedModelLimit.key(provider: "Claude", model: "Fable")
+        let shown = report.displayProviders(hidingModels: [fable])
 
-        let noSpark = report.displayProviders(hidingSpark: HiddenSpark(session: true, weekly: true))
-        let codexRows = noSpark.first { $0.name == "Codex" }?.windows.map(\.label)
-        check(codexRows == ["10.0"], "both spark rows must be droppable, the main window kept")
+        check(
+            report.scopedModelLimits.map(\.model) == ["Fable", "Future"],
+            "settings must list each discovered model once in reading order"
+        )
+        check(
+            shown[0].windows.map(\.label) == ["week", "month (Future)"],
+            "hiding Fable must remove all Fable rows while retaining overall and other model limits"
+        )
     }
 
     private static func testRecentlyActiveProviderStaysVisibleWhenUnreadable() {

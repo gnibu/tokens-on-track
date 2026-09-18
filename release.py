@@ -29,12 +29,12 @@ on this team's first submission.
 commit that has not landed on main fails in the first second rather than after
 two compiles and two round trips to Apple's notary queue.
 
-The version is not bumped by hand. CFBundleShortVersionString in
-Resources/Info.plist names only the major.minor train to release; the patch
-auto-increments from the highest v<major>.<minor>.* tag already published, and
-CFBundleVersion is the HEAD commit count. Both are injected into the built
-bundle, so a routine release touches no version string, and a deliberate minor
-or major bump is the single act of editing the train in the plist.
+The version is not bumped by hand. TOTReleaseTrain in Resources/Info.plist
+names only the major.minor train to release; the patch auto-increments from the
+highest v<major>.<minor>.* tag already published, and CFBundleVersion is the
+HEAD commit count. All displayed and bundle versions are injected into the
+built app, so a deliberate minor or major bump is the single act of editing
+the train in the plist.
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import os
 import plistlib
-import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +62,14 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.theme import Theme
+
+from versioning import (
+    DISPLAY_VERSION_KEY,
+    BundleVersion,
+    next_release_version,
+    release_train,
+    stamp_plist,
+)
 
 APP_NAME = "Tokens on Track"
 BINARY_NAME = "AIUsage"
@@ -370,7 +377,7 @@ def compile_universal(work: Path) -> Path:
     return fused
 
 
-def assemble(bundle: Path, binary: Path, version: str, build: str) -> None:
+def assemble(bundle: Path, binary: Path, version: BundleVersion) -> None:
     step(f"assembling {bundle}")
     macos = bundle / "Contents" / "MacOS"
     resources = bundle / "Contents" / "Resources"
@@ -378,16 +385,10 @@ def assemble(bundle: Path, binary: Path, version: str, build: str) -> None:
     resources.mkdir(parents=True)
 
     shutil.copy2(binary, macos / BINARY_NAME)
-    # The source plist names only the release train (see next_version); the
-    # exact version and build are computed and stamped into the bundle here.
+    # The source plist is a template. Every user-visible and Apple bundle
+    # version is computed from Git and stamped together here.
     info_path = bundle / "Contents" / "Info.plist"
-    shutil.copy2("Resources/Info.plist", info_path)
-    with open(info_path, "rb") as handle:
-        info = plistlib.load(handle)
-    info["CFBundleShortVersionString"] = version
-    info["CFBundleVersion"] = build
-    with open(info_path, "wb") as handle:
-        plistlib.dump(info, handle)
+    stamp_plist(Path("Resources/Info.plist"), info_path, version)
     shutil.copy2("Resources/AppIcon.icns", resources / "AppIcon.icns")
     shutil.copytree("Resources/Icons", resources / "Icons")
     (bundle / "Contents" / "PkgInfo").write_text("APPL????", encoding="ascii")
@@ -423,13 +424,24 @@ def build_dmg(bundle: Path, dmg: Path, version: str, work: Path) -> None:
     )
 
 
-def verify(bundle: Path, dmg: Path) -> None:
+def verify(bundle: Path, dmg: Path, version: BundleVersion) -> None:
     """codesign --verify only proves the signature is intact.
 
     spctl is what actually answers "will this open on a Mac that has never
     seen it", so it runs last and against the stapled artifacts.
     """
     step("verifying")
+    info_path = bundle / "Contents" / "Info.plist"
+    with info_path.open("rb") as handle:
+        info = plistlib.load(handle)
+    stamped = (
+        str(info.get("CFBundleShortVersionString", "")),
+        str(info.get("CFBundleVersion", "")),
+        str(info.get(DISPLAY_VERSION_KEY, "")),
+    )
+    expected = (version.marketing, version.build, version.display)
+    if stamped != expected:
+        fail(f"bundle version mismatch: expected {expected}, found {stamped}")
     run(["spctl", "--assess", "--type", "exec", "--verbose=4", str(bundle)])
     run(
         [
@@ -473,7 +485,12 @@ def source_inputs() -> list[Path]:
     .env because it can decide which certificate signs them.
     """
     roots = [Path("Sources"), Path("Resources")]
-    inputs = [Path("Package.swift"), Path(__file__).resolve(), Path(".env")]
+    inputs = [
+        Path("Package.swift"),
+        Path(__file__).resolve(),
+        Path("versioning.py"),
+        Path(".env"),
+    ]
     for root in roots:
         inputs.append(root)
         inputs.extend(root.rglob("*"))
@@ -529,28 +546,27 @@ def git_out(args: Sequence[str]) -> str:
     return run(["git", *args]).strip()
 
 
-def next_version(train: str) -> tuple[str, str]:
+def next_version(train: str) -> BundleVersion:
     """Derive the release version without a manual bump.
 
-    `train` is CFBundleShortVersionString: only its major.minor is read, the one
-    knob a human turns and only for a deliberate minor or major release. The
+    `train` is TOTReleaseTrain, the one knob a human turns and only for a
+    deliberate minor or major release. The
     patch is the highest v<major>.<minor>.* tag already published locally or on
     origin, plus one (0 when the train is fresh), so routine releases never
     touch a version string. CFBundleVersion is the HEAD commit count: monotonic
     by construction, so it needs no bumping either.
     """
-    major, minor = (int(p) for p in train.split(".")[:2])
-    pattern = re.compile(rf"^v{major}\.{minor}\.(\d+)$")
-
-    names = git_out(["tag", "--list", f"v{major}.{minor}.*"]).splitlines()
+    names = git_out(["tag", "--list", f"v{train}.*"]).splitlines()
     for line in git_out(
-        ["ls-remote", "--tags", "origin", f"v{major}.{minor}.*"]
+        ["ls-remote", "--tags", "origin", f"v{train}.*"]
     ).splitlines():
         names.append(line.split("/")[-1].removesuffix("^{}"))
 
-    patches = [int(m.group(1)) for name in names if (m := pattern.match(name.strip()))]
-    patch = max(patches) + 1 if patches else 0
-    return f"{major}.{minor}.{patch}", git_out(["rev-list", "--count", "HEAD"])
+    return next_release_version(
+        train,
+        names,
+        git_out(["rev-list", "--count", "HEAD"]),
+    )
 
 
 def require_main_commit(head: str, main: str) -> None:
@@ -651,7 +667,7 @@ def publish(dmg: Path, tag: str, version: str) -> None:
 # Every check here maps to a failure that would otherwise surface minutes
 # later, after a full two-architecture compile or a round trip to Apple.
 # --------------------------------------------------------------------- #
-def preflight(identity: str, profile: str, publishing: bool) -> tuple[str, str]:
+def preflight(identity: str, profile: str, publishing: bool) -> BundleVersion:
     step("preflight")
 
     if not identity.startswith("Developer ID Application:"):
@@ -667,24 +683,22 @@ def preflight(identity: str, profile: str, publishing: bool) -> tuple[str, str]:
     if not quiet_ok(["xcrun", "notarytool", "history", "--keychain-profile", profile]):
         fail(f'notary profile "{profile}" is missing or invalid.\nRun: ./setup-signing.sh')
 
-    with open("Resources/Info.plist", "rb") as handle:
-        info = plistlib.load(handle)
-    version, build = next_version(str(info["CFBundleShortVersionString"]))
+    version = next_version(release_train(Path("Resources/Info.plist")))
 
     table = Table.grid(padding=(0, 2))
     table.add_column(style="dim")
     table.add_column()
-    table.add_row("app", f"{APP_NAME} {version} ({build})")
+    table.add_row("app", f"{APP_NAME} {version.marketing} ({version.build})")
     table.add_row("identity", identity)
     table.add_row("notary profile", profile)
     if publishing:
-        table.add_row("publishing", f"v{version} to GitHub")
+        table.add_row("publishing", f"v{version.marketing} to GitHub")
     console.print(Panel(table, title="release", border_style="cyan"))
 
     if publishing:
-        publish_preflight(f"v{version}")
+        publish_preflight(f"v{version.marketing}")
 
-    return version, build
+    return version
 
 
 # --------------------------------------------------------------------- #
@@ -695,10 +709,10 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
     identity = resolve_identity(setting("DEVELOPER_ID", dotenv))
     profile = setting("NOTARY_PROFILE", dotenv, "tokens-on-track-notary")
 
-    version, build = preflight(identity, profile, publishing)
+    version = preflight(identity, profile, publishing)
 
     bundle = DIST_DIR / f"{APP_NAME}.app"
-    dmg = DIST_DIR / f"{ASSET_NAME}-{version}.dmg"
+    dmg = DIST_DIR / f"{ASSET_NAME}-{version.marketing}.dmg"
 
     if not force and dist_is_current(bundle, dmg, identity):
         step("dist is up to date")
@@ -715,7 +729,7 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
         work = Path(tmp)
 
         binary = compile_universal(work)
-        assemble(bundle, binary, version, build)
+        assemble(bundle, binary, version)
 
         step("signing app")
         sign(bundle, identity, hardened=True)
@@ -731,7 +745,7 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
         step("stapling app")
         run(["xcrun", "stapler", "staple", str(bundle)])
 
-        build_dmg(bundle, dmg, version, work)
+        build_dmg(bundle, dmg, version.marketing, work)
 
         step("signing dmg")
         sign(dmg, identity, hardened=False)
@@ -744,12 +758,12 @@ def release(timeout_minutes: int, publishing: bool, force: bool) -> None:
     finish(bundle, dmg, version, publishing)
 
 
-def finish(bundle: Path, dmg: Path, version: str, publishing: bool) -> None:
+def finish(bundle: Path, dmg: Path, version: BundleVersion, publishing: bool) -> None:
     """Everything that is worth doing whether or not the build just ran."""
-    verify(bundle, dmg)
+    verify(bundle, dmg, version)
 
     if publishing:
-        publish(dmg, f"v{version}", version)
+        publish(dmg, f"v{version.marketing}", version.marketing)
 
     size_mb = dmg.stat().st_size / (1024 * 1024)
     console.print()
