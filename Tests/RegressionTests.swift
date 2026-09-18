@@ -37,6 +37,7 @@ enum RegressionTests {
         testOfflinePollAsksAgainSooner()
         testJWTExpiryIsParsed()
         testStaleTokenSurvivesTheCarry()
+        testCarryRemembersConductorSource()
         testBudgetModeQuotesTheBudget()
         testTargetModeQuotesThePaceIndex()
         testTargetModeSaysNothingWhileTheWindowIsYoung()
@@ -575,6 +576,27 @@ enum RegressionTests {
         unbudgeted.windows = [window(percent: 5, elapsedPercent: 10)]
         let budgetless = Report(providers: [unbudgeted], date: now)
         check(!budgetless.hasNoReading, "awaiting a budget is setup, not a retry")
+    }
+
+    private static func testCarryRemembersConductorSource() {
+        // A Conductor-discovered key is visible only while an OpenCode session
+        // runs, so it vanishes between polls. The carried reading must remember
+        // it came from Conductor, so the surface can point back there rather
+        // than showing a bare "not connected".
+        var good = provider(name: "OpenRouter", windows: [window(percent: 20, elapsedPercent: 50)])
+        good.credentialSource = .conductor
+        let previous = Report(providers: [good], date: now)
+
+        var lost = Provider(name: "OpenRouter")
+        lost.error = OpenRouterBudget.notConnectedMessage
+        let later = now.addingTimeInterval(300)
+        let carried = Report(providers: [lost], date: later).carryingOver(from: previous, now: later)
+
+        check(carried.providers[0].stale, "the last reading must be carried")
+        check(
+            carried.providers[0].credentialSource == .conductor,
+            "the carried reading must remember the Conductor source"
+        )
     }
 
     private static func testJWTExpiryIsParsed() {

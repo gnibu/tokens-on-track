@@ -5,6 +5,9 @@ import Foundation
 /// Mac's current time zone must not change either boundary.
 enum OpenRouterBudget {
     static let missingBudgetMessage = "please define a budget in Settings"
+    /// No credential was found this poll at all. Named so the fetcher that sets
+    /// it and the surfaces that tailor it cannot drift apart.
+    static let notConnectedMessage = "not connected"
 
     static func windows(
         dailySpend: Double,

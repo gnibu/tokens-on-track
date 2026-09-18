@@ -177,26 +177,30 @@ final class UsageStore: ObservableObject {
     /// user's interval and are not hammered alongside it.
     private func refreshDue() async {
         let now = Date()
-        var due = dueNames(at: now)
+        let due = dueNames(at: now)
+        // Everyone due this round is the normal interval, so it stamps the
+        // report's clock; a lone retry of a provider in trouble does not. Decide
+        // this before holding a rejected provider back below — it was still
+        // attended to (by a local token check), so a stale token must not freeze
+        // "updated …" while the others keep refreshing.
+        let full = due.count == Fetcher.providerNames.count
         // A provider whose token was rejected will 401 again until the CLI
         // writes a fresh one. Rather than re-poll blind, watch the token's local
         // expiry and ask again only when it moves — the sign a new token landed.
         // Until then the minute wake is a local read, not an API call.
-        due.removeAll { name in
+        let toPoll = due.filter { name in
             guard staleToken(name),
+                  withinCarryWindow(name, now: now),
                   Fetcher.localTokenExpiry(name) == polledTokenExpiry[name] ?? nil
-            else { return false }
+            else { return true }
             lastAttempt[name] = now  // attended: recheck in a minute, don't spin
-            return true
+            return false
         }
-        guard !due.isEmpty else {
+        guard !toPoll.isEmpty else {
             scheduleTimer()
             return
         }
-        // Asking everyone is the normal interval again, so it stamps the
-        // report's clock; a lone retry of a provider in trouble does not.
-        let full = due.count == Fetcher.providerNames.count
-        await refresh(names: due, full: full)
+        await refresh(names: toPoll, full: full)
     }
 
     private func refresh(names: [String], full: Bool) async {
@@ -293,6 +297,18 @@ final class UsageStore: ObservableObject {
 
     private func staleToken(_ name: String) -> Bool {
         report?.providers.first { $0.name == name }?.staleToken ?? false
+    }
+
+    /// Whether a rejected provider's carried reading is still young enough to be
+    /// worth holding back for. Once it ages past the carry limit the reading
+    /// must be dropped, and only re-polling gets it there — the carry runs when
+    /// a poll lands as not-ok, which a held-back provider never does. Nil
+    /// timestamp means nothing is being carried, so there is nothing to expire.
+    private func withinCarryWindow(_ name: String, now: Date) -> Bool {
+        guard let measured = report?.providers.first(where: { $0.name == name })?.measuredAt else {
+            return true
+        }
+        return now.timeIntervalSince1970 - Double(measured) < Report.carryLimit
     }
 
     private func dueNames(at now: Date) -> [String] {

@@ -252,7 +252,7 @@ struct OutageNotice: View {
     /// A stale provider still has rows below, so the notice has to say which
     /// reading those rows are — otherwise the numbers look current.
     static func line(_ provider: Provider) -> String {
-        let reason = provider.error ?? "no reading"
+        let reason = outageReason(provider)
         // Only name the reading's age when its rows are actually on screen; a
         // stale-and-empty provider shows "no recent reading" instead of rows, so
         // "· rows from …" would point at nothing.
@@ -260,6 +260,18 @@ struct OutageNotice: View {
             return "\(provider.name): \(reason)"
         }
         return "\(provider.name): \(reason) · rows from \(Pace.clockLabel(measured))"
+    }
+
+    /// What went wrong, in the reader's terms. "not connected" is generic, but
+    /// when the last key we did find was a Conductor one — discoverable only
+    /// while an OpenCode session runs — we can name the way back to a reading.
+    private static func outageReason(_ provider: Provider) -> String {
+        if provider.name == "OpenRouter",
+           provider.error == OpenRouterBudget.notConnectedMessage,
+           provider.credentialSource == .conductor {
+            return "no live key — run an OpenRouter task in Conductor to refresh"
+        }
+        return provider.error ?? "no reading"
     }
 }
 

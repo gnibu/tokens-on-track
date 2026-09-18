@@ -176,7 +176,7 @@ enum Fetcher {
         var provider = Provider(name: "OpenRouter")
         let candidates = openRouterCandidates()
         guard !candidates.isEmpty else {
-            provider.error = "not connected"
+            provider.error = OpenRouterBudget.notConnectedMessage
             return provider
         }
         provider.loggedIn = true

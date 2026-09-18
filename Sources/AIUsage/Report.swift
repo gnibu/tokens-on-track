@@ -231,6 +231,11 @@ struct Report: Codable, Equatable {
             carried.stale = true
             carried.loggedIn = true
             carried.plan = provider.plan ?? old.plan
+            // Remember where the carried reading's credential came from, even
+            // though this poll found none. It lets a surface say "the last key
+            // was a Conductor one — run OpenRouter there again" rather than a
+            // bare "not connected".
+            carried.credentialSource = provider.credentialSource ?? old.credentialSource
             carried.windows = live
             carried.measuredAt = measured
             return carried
