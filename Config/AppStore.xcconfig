@@ -1,0 +1,7 @@
+#include "Store.xcconfig"
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+ONLY_ACTIVE_ARCH = NO
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+// Archive with automatic development signing; Organizer/export signs the
+// final Mac App Store product using the team's distribution certificate.

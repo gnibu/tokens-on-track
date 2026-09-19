@@ -21,10 +21,15 @@ final class UsageStore: ObservableObject {
     @Published private(set) var statusTooltip: String = "Tokens on Track — no reading yet"
 
     nonisolated static var stateDirectory: URL {
+        #if APP_STORE
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Tokens on Track", isDirectory: true)
+        #else
         if let override = ProcessInfo.processInfo.environment["AI_USAGE_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
         return URL(fileURLWithPath: ("~/.local/share/ai-usage" as NSString).expandingTildeInPath)
+        #endif
     }
 
     nonisolated static var cacheURL: URL { stateDirectory.appendingPathComponent("usage.json") }
@@ -63,6 +68,7 @@ final class UsageStore: ObservableObject {
     /// whose token was rejected, so a healthy poll reads no extra credentials.
     private var polledTokenExpiry: [String: Double?] = [:]
     private var refreshTimer: Timer?
+    private var refreshAfterConnectionChange = false
     private var scheduleBoundaryTimer: Timer?
     private var workSchedule = WorkSchedule.disabled
     private var preferenceWatches: Set<AnyCancellable> = []
@@ -182,6 +188,16 @@ final class UsageStore: ObservableObject {
         await refresh(names: Fetcher.providerNames, full: true)
     }
 
+    /// A grant can change while the startup poll is still running. Queue one
+    /// fresh poll so a just-connected provider need not wait for the timer.
+    func connectionsChanged() {
+        if isRefreshing {
+            refreshAfterConnectionChange = true
+        } else {
+            Task { await refresh() }
+        }
+    }
+
     /// The timer's job: ask only the providers whose own cadence has come due,
     /// so an unreachable one is retried every minute while the rest keep the
     /// user's interval and are not hammered alongside it.
@@ -216,7 +232,13 @@ final class UsageStore: ObservableObject {
     private func refresh(names: [String], full: Bool) async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshAfterConnectionChange {
+                refreshAfterConnectionChange = false
+                Task { await refresh() }
+            }
+        }
 
         // Charge each poll from when it started, so a slow timeout cannot push
         // the next try out past its cadence.

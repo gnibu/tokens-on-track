@@ -8,6 +8,7 @@ enum RegressionTests {
     private static let wallTiming = Pace.Timing(now: now)
 
     static func main() {
+        ProviderFolderAccessTests.run()
         testRedHighUsageWindowOutranksGreenWindow()
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()

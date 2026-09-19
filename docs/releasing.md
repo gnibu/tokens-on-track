@@ -1,5 +1,10 @@
 # Releasing
 
+For the planned paid Mac App Store version, follow the
+[App Store release checklist](app-store-release.md) and
+[Store build instructions](app-store-build.md). The instructions below
+cover direct distribution through GitHub.
+
 `build.sh` is the development loop — host architecture, ad-hoc signature, no
 network. `release.py` is the shipping loop: a universal binary, a Developer ID
 signature, notarization, and a stapled `.dmg` that opens on a stranger's Mac

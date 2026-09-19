@@ -390,6 +390,8 @@ def assemble(bundle: Path, binary: Path, version: BundleVersion) -> None:
     info_path = bundle / "Contents" / "Info.plist"
     stamp_plist(Path("Resources/Info.plist"), info_path, version)
     shutil.copy2("Resources/AppIcon.icns", resources / "AppIcon.icns")
+    for name in ("Privacy.html", "PrivacyInfo.xcprivacy"):
+        shutil.copy2(Path("Resources") / name, resources / name)
     shutil.copytree("Resources/Icons", resources / "Icons")
     (bundle / "Contents" / "PkgInfo").write_text("APPL????", encoding="ascii")
 

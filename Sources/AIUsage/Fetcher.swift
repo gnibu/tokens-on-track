@@ -192,11 +192,17 @@ enum Fetcher {
     static func fetchCodex() async -> Provider {
         var provider = Provider(name: "Codex")
 
-        guard let raw = FileManager.default.contents(atPath: codexAuthPath),
+        guard let raw = codexAuthData(),
               let tokens = json(raw)?["tokens"] as? [String: Any],
               let token = tokens["access_token"] as? String, !token.isEmpty
         else {
+            #if APP_STORE
+            provider.error = ProviderFolderAccess.shared.isSelected(.codex)
+                ? "Cannot read Codex login — run codex, or choose its folder again in Settings"
+                : "Choose the Codex folder in Settings"
+            #else
             provider.error = "not logged in"
+            #endif
             return provider
         }
         provider.loggedIn = true
@@ -346,6 +352,7 @@ enum Fetcher {
         if let key = OpenRouterKeychain.read() {
             candidates.append(.init(key: key, source: .keychain, authoritative: true))
         }
+        #if !APP_STORE
         if let raw = FileManager.default.contents(atPath: OpenRouterCredential.openCodeAuthPath),
            let key = OpenRouterCredential.key(inOpenCodeAuth: raw) {
             candidates.append(.init(key: key, source: .openCode, authoritative: false))
@@ -356,6 +363,7 @@ enum Fetcher {
         candidates += conductorOpenRouterKeys().map {
             .init(key: $0, source: .conductor, authoritative: false)
         }
+        #endif
 
         var seen = Set<String>()
         return candidates.filter { seen.insert($0.key).inserted }
@@ -364,6 +372,7 @@ enum Fetcher {
     /// Conductor injects provider keys into its managed OpenCode child rather
     /// than OpenCode's normal auth file. There is no public credential API, so
     /// this same-user process lookup is intentionally a last, transient resort.
+    #if !APP_STORE
     private static func conductorOpenRouterKeys() -> [String] {
         guard let raw = runProcess(
             executableURL: URL(fileURLWithPath: "/bin/ps"),
@@ -382,6 +391,8 @@ enum Fetcher {
             return OpenRouterCredential.key(inProcessEnvironment: environment)
         }
     }
+
+    #endif
 
     private static func openRouterNote(for code: Int, manual: Bool) -> String {
         switch code {
@@ -554,15 +565,18 @@ enum Fetcher {
         if let key = CursorKeychain.read() {
             candidates.append(.init(secret: key, source: .keychain, authoritative: true))
         }
+        #if !APP_STORE
         if let key = ProcessInfo.processInfo.environment["CURSOR_API_KEY"], !key.isEmpty {
             candidates.append(.init(secret: key, source: .environment, authoritative: false))
         }
         if let key = ProcessInfo.processInfo.environment["CURSOR_SESSION_TOKEN"], !key.isEmpty {
             candidates.append(.init(secret: key, source: .environment, authoritative: false))
         }
+        #endif
         if let jwt = cursorStateToken() {
             candidates.append(.init(secret: jwt, source: .cursorApp, authoritative: false))
         }
+        #if !APP_STORE
         if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
             .flatMap({ String(data: $0, encoding: .utf8) })
         {
@@ -579,19 +593,36 @@ enum Fetcher {
         candidates += conductorCursorKeys().map {
             .init(secret: $0, source: .conductor, authoritative: false)
         }
+        #endif
 
         var seen = Set<String>()
         return candidates.filter { seen.insert($0.secret).inserted }
     }
 
+    private static func codexAuthData() -> Data? {
+        #if APP_STORE
+        return try? ProviderFolderAccess.shared.withFile(for: .codex) { try Data(contentsOf: $0) }
+        #else
+        return FileManager.default.contents(atPath: codexAuthPath)
+        #endif
+    }
+
     private static func cursorStateToken() -> String? {
-        guard FileManager.default.fileExists(atPath: CursorCredential.stateDBPath) else { return nil }
+        #if APP_STORE
+        return try? ProviderFolderAccess.shared.withFile(for: .cursor) { cursorStateToken(at: $0.path) }
+        #else
+        return cursorStateToken(at: CursorCredential.stateDBPath)
+        #endif
+    }
+
+    private static func cursorStateToken(at path: String) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
         guard let raw = runProcess(
             executableURL: URL(fileURLWithPath: "/usr/bin/sqlite3"),
             arguments: [
                 "-readonly",
                 "-batch",
-                CursorCredential.stateDBPath,
+                path,
                 "SELECT value FROM ItemTable WHERE key = '\(CursorCredential.accessTokenKey)';",
             ],
             timeout: 5
@@ -602,6 +633,7 @@ enum Fetcher {
         return token
     }
 
+    #if !APP_STORE
     private static func conductorCursorKeys() -> [String] {
         guard let raw = runProcess(
             executableURL: URL(fileURLWithPath: "/bin/ps"),
@@ -620,6 +652,8 @@ enum Fetcher {
             return CursorCredential.key(inProcessEnvironment: environment)
         }
     }
+
+    #endif
 
     private static func cursorNote(for code: Int, manual: Bool) -> String {
         switch code {
@@ -660,7 +694,7 @@ enum Fetcher {
             else { return nil }
             return ms / 1000  // stored in milliseconds
         case "Codex":
-            guard let raw = FileManager.default.contents(atPath: codexAuthPath),
+            guard let raw = codexAuthData(),
                   let tokens = json(raw)?["tokens"] as? [String: Any],
                   let token = tokens["access_token"] as? String
             else { return nil }
@@ -669,11 +703,13 @@ enum Fetcher {
             if let saved = CursorKeychain.read(), let jwt = CursorCredential.session(from: saved)?.jwt {
                 return jwtExpiry(jwt)
             }
+            #if !APP_STORE
             if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
                 .flatMap({ String(data: $0, encoding: .utf8) })
             {
                 return jwtExpiry(jwt)
             }
+            #endif
             return cursorStateToken().flatMap(jwtExpiry)
         default:
             return nil
