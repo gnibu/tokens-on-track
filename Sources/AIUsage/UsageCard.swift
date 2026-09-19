@@ -354,12 +354,12 @@ struct ProviderBlock: View {
                         mode: mode,
                         timing: timing,
                         showsCost: showsCost,
-                        isWorst: worstRow == Report.rowKey(provider: provider, window: window)
+                        isWorst: worstRow == Report.rowKey(provider: provider, window: window),
+                        dimmed: provider.stale
                     )
                 }
             }
             .padding(.leading, rowLeadingInset)
-            .opacity(provider.stale ? 0.55 : 1)
         }
     }
 
@@ -422,35 +422,32 @@ struct UsageRow: View {
     var timing = Pace.Timing()
     var showsCost: Bool = false
     var isWorst: Bool = false
+    /// A carried reading: same type size as a live one, only quieter ink.
+    var dimmed: Bool = false
+
+    private func rowInk(_ level: Double) -> Color {
+        Glass.ink(dimmed ? level * 0.55 : level)
+    }
 
     var body: some View {
         let reading = Pace.reading(window, mode: mode, timing: timing)
         let cost = showsCost ? OpenRouterBudget.detail(for: window) : nil
 
-        HStack(spacing: metrics.gap) {
-            // The dot sits in a gutter every row pays for, so marking a row
-            // moves nothing.
-            HStack(alignment: .top, spacing: 5) {
-                Circle()
-                    .fill(isWorst ? Pace.color(window, timing: timing) : .clear)
-                    .frame(width: 4, height: 4)
-                    .padding(.top, cost == nil ? 6 : 5)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(window.label)
-                        .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
-                        .foregroundStyle(Glass.ink(isWorst ? 0.95 : 0.6))
+        HStack(alignment: .firstTextBaseline, spacing: metrics.gap) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(window.label)
+                    .font(.system(size: metrics.labelSize, weight: isWorst ? .semibold : .regular))
+                    .foregroundStyle(rowInk(isWorst ? 0.95 : 0.6))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.75)
+                    .allowsTightening(true)
+                if let cost {
+                    Text(cost)
+                        .font(.system(size: max(8, metrics.labelSize - 4)))
+                        .monospacedDigit()
+                        .foregroundStyle(rowInk(0.4))
                         .lineLimit(1)
-                        .truncationMode(.tail)
-                        .minimumScaleFactor(0.75)
-                        .allowsTightening(true)
-                    if let cost {
-                        Text(cost)
-                            .font(.system(size: max(8, metrics.labelSize - 4)))
-                            .monospacedDigit()
-                            .foregroundStyle(Glass.ink(0.4))
-                            .lineLimit(1)
-                    }
                 }
             }
             .frame(width: metrics.label, alignment: .leading)
@@ -460,8 +457,13 @@ struct UsageRow: View {
                 target: Pace.targetPercent(window, timing: timing),
                 palette: Pace.palette(window, timing: timing),
                 height: metrics.trackHeight,
-                glows: metrics.glows
+                glows: metrics.glows,
+                dimmed: dimmed
             )
+            .alignmentGuide(.firstTextBaseline) { dimensions in
+                // Sit the bar on the label's baseline like the figures beside it.
+                dimensions[.bottom] - metrics.trackHeight * 0.55
+            }
 
             // Dimmed when there is nothing to report and when the window is too
             // young to have a stable target comparison, so a dash reads as
@@ -469,16 +471,14 @@ struct UsageRow: View {
             Text(reading.text)
                 .font(.system(size: metrics.percentSize, weight: .semibold))
                 .monospacedDigit()
-                .foregroundStyle(Glass.ink(window.percent < 0.5 || !reading.hasValue ? 0.55 : 1))
+                .foregroundStyle(rowInk(window.percent < 0.5 || !reading.hasValue ? 0.55 : 1))
                 .frame(width: metrics.percent, alignment: .trailing)
 
             Text(Pace.resetLabel(window.resetsAt))
-                .font(.system(size: metrics.resetSize))
-                .monospacedDigit()
-                .foregroundStyle(Glass.ink(0.45))
+                .font(.system(size: metrics.resetSize, weight: .regular, design: .monospaced))
+                .foregroundStyle(rowInk(0.45))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .allowsTightening(true)
+                .truncationMode(.tail)
                 .frame(width: metrics.reset, alignment: .trailing)
         }
     }

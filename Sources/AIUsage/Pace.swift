@@ -466,8 +466,8 @@ enum Pace {
         return clock.string(from: date)
     }
 
-    /// Absolute reset time. Bare clock today, weekday within the week, and a
-    /// date beyond that — a weekday alone is ambiguous once it wraps around.
+    /// Absolute reset time. Today is clock-only; inside the next seven days is
+    /// weekday plus hour; beyond that, date only — the hour is noise that far off.
     static func resetLabel(_ epoch: Int?, now: Date = Date()) -> String {
         // An untouched window has no reset instant yet; the clock starts on use.
         guard let epoch, epoch > 0 else { return "idle" }
@@ -479,10 +479,9 @@ enum Pace {
         let calendar = Calendar.current
         if calendar.isDate(at, inSameDayAs: now) { return clock.string(from: at) }
 
-        if at.timeIntervalSince(now) >= 6 * 86400 {
+        if at.timeIntervalSince(now) >= 7 * 86400 {
             let long = DateFormatter()
-            // Compact enough for the reset column beside multi-row providers.
-            long.dateFormat = "M/d HH:mm"
+            long.dateFormat = "MM/dd"
             return long.string(from: at)
         }
         let weekday = DateFormatter()
