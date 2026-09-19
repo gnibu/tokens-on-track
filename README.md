@@ -130,17 +130,17 @@ wall-clock target.
 
 ### Why not a WidgetKit widget
 
-Because it would be strictly worse here. A widget extension runs sandboxed, so
-it could read neither the Keychain nor `~/.codex/auth.json`, and it would need
-an App Group — which needs a paid developer team — merely to see the cache the
-app already writes. It would also need full Xcode to build, and it could only
-sit in the widget grid. The desktop card drags anywhere and needs none of that.
+The desktop card can be dragged anywhere and shares the running app's state
+and refresh schedule. A WidgetKit extension would need a separate data-sharing
+and refresh design. Sandboxing itself does not prevent this app from working:
+the Store edition uses explicit folder grants and Keychain access.
 
 ## How it works
 
-The app fetches on its own timer, on wake, and on demand, then writes
-`~/.local/share/ai-usage/usage.json` (override the directory with
-`AI_USAGE_DIR`). Everything on screen is drawn from that one file, so the menu
+The app fetches on its own timer, on wake, and on demand. The direct-download
+edition caches readings in `~/.local/share/ai-usage/usage.json` (override the
+directory with `AI_USAGE_DIR`); the Store edition uses its sandbox's Application
+Support directory. Everything on screen shares the same reading, so the menu
 bar ring, the dropdown and the desktop card can never disagree.
 
 | Source file | Job |
@@ -299,8 +299,13 @@ Git's standard descriptive form, such as `v1.1.2-3-gabc1234-dirty`; a published
 build shows only its exact release version.
 
 **Requirements:** macOS 14+ and Command Line Tools (`xcode-select --install`).
-Full Xcode is *not* needed; there is no `.xcodeproj`, `build.sh` assembles the
-bundle by hand.
+Full Xcode is *not* needed for this direct-download build; `build.sh` assembles
+the bundle by hand.
+
+For the sandboxed App Store edition, open `TokensOnTrack.xcodeproj` in full
+Xcode. It uses the same Swift sources with dedicated Store settings and
+provider folder permissions. See [App Store build instructions](docs/app-store-build.md)
+and the [release checklist](docs/app-store-release.md).
 
 Publishing a signed, notarized `.dmg` is a different loop — see
 [docs/releasing.md](docs/releasing.md).

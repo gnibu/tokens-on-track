@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build Tokens on Track.app from the SwiftPM target. Needs the Command Line Tools
-# only — there is no Xcode project to open.
+# only. The separate TokensOnTrack.xcodeproj builds the sandboxed Store edition.
 #
 #   ./build.sh              build into .build/Tokens on Track.app
 #   ./build.sh --install    also copy it to /Applications and launch it
@@ -35,6 +35,7 @@ cp "$BINARY" "$BUNDLE/Contents/MacOS/AIUsage"
 echo "==> stamping version"
 xcrun python3 versioning.py Resources/Info.plist "$BUNDLE/Contents/Info.plist"
 cp Resources/AppIcon.icns "$BUNDLE/Contents/Resources/AppIcon.icns"
+cp Resources/Privacy.html Resources/PrivacyInfo.xcprivacy "$BUNDLE/Contents/Resources/"
 cp -R Resources/Icons "$BUNDLE/Contents/Resources/Icons"
 printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
 

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Tokens on Track — Privacy</title>
+<style>body{font:17px/1.6 system-ui;max-width:720px;margin:60px auto;padding:0 24px;color:#222}h1,h2{line-height:1.2}a{color:#2863c0}@media(prefers-color-scheme:dark){body{background:#171717;color:#eee}a{color:#91baff}}</style>
+</head><body>
+<h1>Tokens on Track privacy policy</h1><p>Updated September 19, 2026 · Tenjin Tech</p>
+<p>Tokens on Track displays usage from AI provider accounts you connect. It has no developer-operated account, analytics service, advertising, or tracking.</p>
+<h2>Credentials and connections</h2>
+<p>The app reads your Claude Code login from macOS Keychain. The App Store build reads Codex and Cursor login files only from folders you explicitly allow. It never writes to those providers’ credential stores. Folder permissions are stored as macOS security-scoped bookmarks and can be removed in Settings.</p>
+<p>API keys you enter for OpenRouter or Cursor are stored in this Mac’s Keychain. You can remove those saved keys in Settings. The direct-download build can also discover credentials from local provider files, environment variables, and supported Conductor processes. The App Store build does not inspect other processes or their environments.</p>
+<h2>Network requests</h2>
+<p>Credentials are sent to the corresponding provider to request your account’s usage: Anthropic, OpenAI, OpenRouter, or Cursor. Requests include the information needed to authenticate, such as account identifiers, tokens, or session cookies. Providers receive your IP address and handle these requests under their own privacy policies. Tenjin Tech does not receive your credentials or usage readings.</p>
+<p>The app does not read conversation content, prompts, or source code.</p>
+<h2>Data on your Mac</h2>
+<p>Preferences, folder permissions, notification state, and a cache of usage readings are stored locally. Usage readings can include plan names, limits, spending, and reset times. Notifications are handled by macOS. The App Store build keeps its files in its app container.</p>
+<h2>Support</h2>
+<p>If you contact us, we receive the information you choose to send. GitHub issues are public: never include API keys, login files, or other private account details. See the <a href="https://github.com/gnibu/tokens-on-track/issues">support page</a> for questions and privacy requests.</p>
+</body></html>

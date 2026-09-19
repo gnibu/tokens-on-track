@@ -112,6 +112,9 @@ private struct SettingsTab: View {
             // of the tab is that the dropdown stays a predictable height.
             CappedScroll(maxHeight: Self.cap) {
                 VStack(alignment: .leading, spacing: 14) {
+                    #if APP_STORE
+                    connectionsGroup
+                    #endif
                     menuBarGroup
                     displayGroup
                     openRouterGroup
@@ -120,6 +123,7 @@ private struct SettingsTab: View {
                     workingHoursGroup
                     alertsGroup
                     refreshGroup
+                    helpGroup
                 }
                 .padding(EdgeInsets(top: 4, leading: 18, bottom: 14, trailing: 18))
             }
@@ -140,6 +144,26 @@ private struct SettingsTab: View {
     }
 
     // ----------------------------------------------------------------- //
+
+    #if APP_STORE
+    private var connectionsGroup: some View {
+        Group {
+            groupTitle("Connections")
+            DividedRows {
+                ProviderFolderRow(folder: .codex)
+                ProviderFolderRow(folder: .cursor)
+                ProviderConnectionInfo(
+                    name: "Claude",
+                    detail: "Uses your Claude Code login in Keychain. Open Claude Code once if its login expires."
+                )
+                ProviderConnectionInfo(
+                    name: "OpenRouter",
+                    detail: "Add an API key below. Keys are saved in this Mac’s Keychain."
+                )
+            }
+        }
+    }
+    #endif
 
     private var menuBarGroup: some View {
         Group {
@@ -783,6 +807,19 @@ private struct SettingsTab: View {
             Spacer(minLength: 8)
             GlassLink(title: "Quit") { NSApplication.shared.terminate(nil) }
         }
+    }
+
+    private var helpGroup: some View {
+        HStack(spacing: 16) {
+            if let policy = Bundle.main.url(forResource: "Privacy", withExtension: "html") {
+                GlassLink(title: "Privacy policy") { NSWorkspace.shared.open(policy) }
+            }
+            GlassLink(title: "Support") {
+                NSWorkspace.shared.open(URL(string: "https://github.com/gnibu/tokens-on-track/issues")!)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 4)
     }
 
     private static var version: String {

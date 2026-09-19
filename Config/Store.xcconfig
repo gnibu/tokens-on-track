@@ -1,0 +1,26 @@
+// Shared by the sandboxed Debug and AppStore configurations. The direct
+// Developer ID distribution remains the SwiftPM target built by build.sh.
+PRODUCT_NAME = Tokens on Track
+EXECUTABLE_NAME = AIUsage
+PRODUCT_BUNDLE_IDENTIFIER = io.github.ai-usage
+DEVELOPMENT_TEAM = 3F5CFS4B2T
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_ENTITLEMENTS = Config/AppStore.entitlements
+ENABLE_APP_SANDBOX = YES
+ENABLE_HARDENED_RUNTIME = YES
+ENABLE_USER_SCRIPT_SANDBOXING = NO
+MACOSX_DEPLOYMENT_TARGET = 14.0
+SDKROOT = macosx
+SUPPORTED_PLATFORMS = macosx
+ARCHS = $(ARCHS_STANDARD)
+SWIFT_VERSION = 5.0
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) APP_STORE
+GENERATE_INFOPLIST_FILE = NO
+INFOPLIST_FILE = $(DERIVED_FILE_DIR)/AppStore-Info.plist
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+SKIP_INSTALL = NO
+COMBINE_HIDPI_IMAGES = YES
+// Optional per-upload overrides. Blank means use versioning.py's Git version.
+STORE_MARKETING_VERSION =
+STORE_BUILD_NUMBER =

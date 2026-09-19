@@ -13,6 +13,13 @@ dist/
 
 # never commit a signing key
 *.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.xcarchive/
+*.xcuserstate
+xcuserdata/
+DerivedData/
 
 # byte-compiled release.py, from importing it for diagnostics
 __pycache__/
