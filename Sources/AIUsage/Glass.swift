@@ -173,6 +173,9 @@ struct UsageTrack: View {
     let palette: Pace.Palette
     var height: CGFloat = 10
     var glows: Bool = true
+    /// Carried readings fade the bar, not the type — layer opacity made fresh
+    /// providers beside them look oversized.
+    var dimmed: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -200,6 +203,7 @@ struct UsageTrack: View {
             }
         }
         .frame(height: height)
+        .opacity(dimmed ? 0.55 : 1)
     }
 
     /// An untouched window still gets a stub, so the row reads as a track with
