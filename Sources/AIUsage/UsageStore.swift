@@ -273,7 +273,13 @@ final class UsageStore: ObservableObject {
 
         let context = pollingContext(discoveredPaths: discoveredClaudePaths)
         if full || claudeTargets.isEmpty {
-            claudeTargets = Fetcher.claudePollTargets(context: context)
+            let resolved = await Task.detached(priority: .userInitiated) {
+                Fetcher.claudePollTargets(context: context)
+            }.value
+            claudeTargets = resolved.targets
+            for path in resolved.loggedInPaths {
+                preferences.rememberClaudeProfile(path)
+            }
         }
         let allIDs = Fetcher.pollTargetIDs(claudeTargets: claudeTargets)
         // Resolved here, on the main actor, so the fetch tasks never read Preferences.

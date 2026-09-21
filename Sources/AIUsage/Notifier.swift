@@ -110,7 +110,13 @@ enum Notifier {
         guard let data = UserDefaults.standard.data(forKey: stateKey),
               let marks = try? JSONDecoder().decode([String: Mark].self, from: data)
         else { return [:] }
-        return marks
+        // Keys were `Claude/…` before providers had stable ids; carry them to
+        // the default profile's id so an upgrade does not repeat an alert.
+        let legacy = "Claude/"
+        let current = ClaudeProfile.defaultKeychainService + "/"
+        return Dictionary(marks.map { key, mark in
+            key.hasPrefix(legacy) ? (current + String(key.dropFirst(legacy.count)), mark) : (key, mark)
+        }, uniquingKeysWith: { new, _ in new })
     }
 
     private static func saveMarks(_ marks: [String: Mark]) {

@@ -261,8 +261,7 @@ final class Preferences: ObservableObject {
             configuredPaths: claudeConfiguredPaths,
             rememberedPaths: claudeRememberedPaths,
             ignoredPaths: claudeIgnoredPaths,
-            label: { [self] in claudeLabel(for: $0) },
-            remember: { [self] in rememberClaudeProfile($0) }
+            label: { [self] in claudeLabel(for: $0) }
         )
     }
 

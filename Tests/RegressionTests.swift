@@ -1653,6 +1653,7 @@ enum RegressionTests {
         let processList = """
         123 /Users/me/.local/bin/claude chat
         456 node /path/to/claude-code/cli.js
+        789 /Users/me/.local/bin/claude --chrome-native-host
         """
         check(ClaudeCredential.claudePIDs(in: processList) == [123, 456], "Claude Code processes must be detected")
         let environment = "PATH=/usr/bin CLAUDE_CONFIG_DIR=/Users/me/.claude-team OTHER=x"

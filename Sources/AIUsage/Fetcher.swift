@@ -64,7 +64,12 @@ enum Fetcher {
         }
     }
 
-    static func claudePollTargets(context: ClaudePollingContext = .init()) -> [ClaudeProfile.Entry] {
+    /// Reads the Keychain once per profile, so callers keep this off the main
+    /// actor. `loggedInPaths` is every profile with a token, for the caller to
+    /// remember; duplicates of another profile's token are not polled.
+    static func claudePollTargets(
+        context: ClaudePollingContext = .init()
+    ) -> (targets: [ClaudeProfile.Entry], loggedInPaths: [String]) {
         let catalog = ClaudeProfile.catalog(
             configuredPaths: context.configuredPaths,
             rememberedPaths: context.rememberedPaths,
@@ -80,9 +85,6 @@ enum Fetcher {
             return snapshot
         }
         let loggedIn = catalog.filter { oauth($0) != nil }
-        for entry in loggedIn {
-            context.remember(entry.normalizedPath)
-        }
         var pollable = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
             if let hit = oauthCache[service] { return hit }
             let snapshot = keychainSecret(service: service).flatMap(ClaudeProfile.parseOAuth)
@@ -98,7 +100,7 @@ enum Fetcher {
                 pollable.append(entry)
             }
         }
-        return pollable
+        return (pollable, loggedIn.map(\.normalizedPath))
     }
 
     // ----------------------------------------------------------------- //
@@ -180,7 +182,9 @@ enum Fetcher {
 
         var seen = Set<String>()
         var paths: [String] = []
-        for pid in ClaudeCredential.claudePIDs(in: list).prefix(8) {
+        // Newest first: a session just started with CLAUDE_CONFIG_DIR is the
+        // one worth finding, and long-lived ones were caught on earlier scans.
+        for pid in ClaudeCredential.claudePIDs(in: list).suffix(8).reversed() {
             guard let raw = runProcess(
                 executableURL: URL(fileURLWithPath: "/bin/ps"),
                 arguments: ["eww", "-p", String(pid), "-o", "command="],

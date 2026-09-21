@@ -11,7 +11,6 @@ struct ClaudePollingContext {
     /// Filled by the store after a process scan; never spawn `ps` while building targets.
     var discoveredPaths: [String] = []
     var label: (String) -> String? = { _ in nil }
-    var remember: (String) -> Void = { _ in }
 }
 
 enum ClaudeProfile {
@@ -252,7 +251,8 @@ enum ClaudeCredential {
                   let pid = Int32(line[..<split])
             else { return nil }
             let command = line[split...].trimmingCharacters(in: .whitespaces).lowercased()
-            guard looksLikeClaudeCode(command) else { return nil }
+            guard looksLikeClaudeCode(command), !command.contains("--chrome-native-host")
+            else { return nil }
             return pid
         }
     }
