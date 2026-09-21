@@ -369,7 +369,11 @@ def compile_universal(work: Path) -> Path:
                 ["swift", "build", "-c", "release", "--triple", triple, "--show-bin-path"]
             ).strip()
         detail(f"{triple} ok", style="ok")
-        slices.append(str(Path(bin_path) / BINARY_NAME))
+        # Newer SwiftPM reports one bin path for every triple, so the next
+        # build would overwrite this slice. Copy it out before moving on.
+        slice_path = work / f"{BINARY_NAME}-{triple}"
+        shutil.copy2(Path(bin_path) / BINARY_NAME, slice_path)
+        slices.append(str(slice_path))
 
     fused = work / BINARY_NAME
     run(["lipo", "-create", "-output", str(fused), *slices])
