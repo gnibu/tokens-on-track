@@ -10,7 +10,6 @@ import Foundation
 enum Fetcher {
     static let keychainService = "Claude Code-credentials"
     static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    static let codexAuthPath = ("~/.codex/auth.json" as NSString).expandingTildeInPath
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
     static let openRouterUsageURL = URL(string: "https://openrouter.ai/api/v1/key")!
     static let cursorUsageSummaryURL = URL(string: "https://cursor.com/api/usage-summary")!
@@ -19,13 +18,17 @@ enum Fetcher {
 
     static let timeout: TimeInterval = 20
 
-    static let codexID = "Codex"
+    static let codexID = CodexProfile.defaultID
     static let openRouterID = "OpenRouter"
     static let cursorID = "Cursor"
 
-    /// Poll targets in display order: each Claude profile, then the other providers.
-    static func pollTargetIDs(claudeTargets: [ClaudeProfile.Entry]) -> [String] {
-        claudeTargets.map(\.id) + [codexID, openRouterID, cursorID]
+    /// Poll targets in display order: Claude profiles, Codex profiles, then
+    /// providers which still have one credential source.
+    static func pollTargetIDs(
+        claudeTargets: [ClaudeProfile.Entry],
+        codexTargets: [CodexProfile.Entry]
+    ) -> [String] {
+        claudeTargets.map(\.id) + codexTargets.map(\.id) + [openRouterID, cursorID]
     }
 
     /// Fetch every target id, concurrently. A target left out is one the caller
@@ -34,10 +37,13 @@ enum Fetcher {
         ids: [String],
         claudeTargets: [ClaudeProfile.Entry],
         claudeLabels: [String: String] = [:],
+        codexTargets: [CodexProfile.Entry],
+        codexLabels: [String: String] = [:],
         openRouterMonthlyBudget: Double?,
         cursorMonthlyBudget: Double?
     ) async -> [Provider] {
         let claudeByID = Dictionary(uniqueKeysWithValues: claudeTargets.map { ($0.id, $0) })
+        let codexByID = Dictionary(uniqueKeysWithValues: codexTargets.map { ($0.id, $0) })
         return await withTaskGroup(of: Provider.self) { group in
             for id in ids {
                 group.addTask {
@@ -47,8 +53,13 @@ enum Fetcher {
                             customLabel: claudeLabels[entry.id]
                         )
                     }
+                    if let entry = codexByID[id] {
+                        return await fetchCodex(
+                            entry: entry,
+                            customLabel: codexLabels[entry.id]
+                        )
+                    }
                     switch id {
-                    case codexID: return await fetchCodex()
                     case openRouterID:
                         return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
                     case cursorID:
@@ -92,11 +103,50 @@ enum Fetcher {
             return snapshot
         })
         let seen = Set(pollable.map(\.normalizedPath))
+        let loggedInPaths = Set(loggedIn.map(\.normalizedPath))
         for entry in catalog {
             let path = entry.normalizedPath
-            if path == ClaudeProfile.defaultNormalizedPath, !seen.contains(path) {
+            if path == ClaudeProfile.defaultNormalizedPath,
+               !seen.contains(path), !loggedInPaths.contains(path) {
                 pollable.insert(entry, at: 0)
-            } else if context.configuredPaths.contains(path), !seen.contains(path) {
+            } else if context.configuredPaths.contains(path),
+                      !seen.contains(path), !loggedInPaths.contains(path) {
+                pollable.append(entry)
+            }
+        }
+        return (pollable, loggedIn.map(\.normalizedPath))
+    }
+
+    /// Resolve readable Codex homes and collapse profiles which contain the
+    /// same access token. Explicitly configured profiles remain as error rows
+    /// even before auth.json appears, matching Claude profile behavior.
+    static func codexPollTargets(
+        context: CodexPollingContext = .init()
+    ) -> (targets: [CodexProfile.Entry], loggedInPaths: [String]) {
+        let catalog = CodexProfile.catalog(
+            configuredPaths: context.configuredPaths,
+            rememberedPaths: context.rememberedPaths,
+            discoveredPaths: context.discoveredPaths,
+            ignoredPaths: context.ignoredPaths
+        )
+        var authCache: [String: CodexProfile.AuthSnapshot?] = [:]
+        func auth(_ entry: CodexProfile.Entry) -> CodexProfile.AuthSnapshot? {
+            if let hit = authCache[entry.id] { return hit }
+            let snapshot = codexAuthData(entry: entry).flatMap(CodexProfile.parseAuth)
+            authCache[entry.id] = snapshot
+            return snapshot
+        }
+        let loggedIn = catalog.filter { auth($0) != nil }
+        var pollable = CodexProfile.collapseDuplicateTokens(loggedIn, auth: auth)
+        let seen = Set(pollable.map(\.normalizedPath))
+        let loggedInPaths = Set(loggedIn.map(\.normalizedPath))
+        for entry in catalog {
+            let path = entry.normalizedPath
+            if path == CodexProfile.defaultNormalizedPath,
+               !seen.contains(path), !loggedInPaths.contains(path) {
+                pollable.insert(entry, at: 0)
+            } else if context.configuredPaths.contains(path),
+                      !seen.contains(path), !loggedInPaths.contains(path) {
                 pollable.append(entry)
             }
         }
@@ -288,17 +338,26 @@ enum Fetcher {
     // Codex
     // ----------------------------------------------------------------- //
 
-    static func fetchCodex() async -> Provider {
-        var provider = Provider(name: "Codex")
+    static func fetchCodex(entry: CodexProfile.Entry, customLabel: String?) async -> Provider {
+        let initialLabel = CodexProfile.defaultLabel(
+            planType: nil,
+            customLabel: customLabel,
+            profilePath: entry.normalizedPath
+        )
+        var provider = Provider(
+            id: entry.providerID,
+            kind: "codex",
+            name: initialLabel,
+            profilePath: entry.normalizedPath
+        )
 
-        guard let raw = codexAuthData(),
-              let tokens = json(raw)?["tokens"] as? [String: Any],
-              let token = tokens["access_token"] as? String, !token.isEmpty
+        guard let raw = codexAuthData(entry: entry),
+              let auth = CodexProfile.parseAuth(raw)
         else {
             #if APP_STORE
-            provider.error = ProviderFolderAccess.shared.isSelected(.codex)
+            provider.error = CodexAccountAccess.shared.isSelected(entry.normalizedPath)
                 ? "Cannot read Codex login — run codex, or choose its folder again in Settings"
-                : "Choose the Codex folder in Settings"
+                : "Choose this Codex profile folder in Settings"
             #else
             provider.error = "not logged in"
             #endif
@@ -307,8 +366,8 @@ enum Fetcher {
         provider.loggedIn = true
 
         let headers = [
-            "Authorization": "Bearer \(token)",
-            "chatgpt-account-id": (tokens["account_id"] as? String) ?? "",
+            "Authorization": "Bearer \(auth.accessToken)",
+            "chatgpt-account-id": auth.accountID,
             "originator": "codex_cli_rs",
             "User-Agent": codexUserAgent,
             "Accept": "application/json",
@@ -320,7 +379,7 @@ enum Fetcher {
             // otherwise valid request; the retry inside covers that.
             data = try await getJSONRetrying(codexUsageURL, headers: headers)
         } catch let error as HTTPStatus {
-            provider.error = note(for: error.code, refreshWith: "codex")
+            provider.error = codexNote(for: error.code, profilePath: entry.normalizedPath)
             provider.staleToken = error.code == 401
             return provider
         } catch {
@@ -330,6 +389,11 @@ enum Fetcher {
         }
 
         provider.plan = data["plan_type"] as? String
+        provider.name = CodexProfile.defaultLabel(
+            planType: provider.plan,
+            customLabel: customLabel,
+            profilePath: entry.normalizedPath
+        )
         provider.windows += codexWindows(data["rate_limit"])
         provider.windows += codexAdditionalWindows(data["additional_rate_limits"])
 
@@ -337,6 +401,41 @@ enum Fetcher {
         if !provider.ok { provider.error = "no limit data" }
         return provider
     }
+
+    static func codexNote(for code: Int, profilePath: String) -> String {
+        if code == 401, profilePath != CodexProfile.defaultNormalizedPath {
+            return "stored token went stale — run Codex with CODEX_HOME=\(profilePath)"
+        }
+        return note(for: code, refreshWith: "codex")
+    }
+
+    #if !APP_STORE
+    static func discoveredCodexHomes() -> [String] {
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
+            timeout: 2
+        ), let list = String(data: raw, encoding: .utf8)
+        else { return [] }
+
+        var seen = Set<String>()
+        var paths: [String] = []
+        for pid in CodexCredential.codexPIDs(in: list).suffix(8).reversed() {
+            guard let raw = runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["eww", "-p", String(pid), "-o", "command="],
+                timeout: 2
+            ), let environment = String(data: raw, encoding: .utf8),
+                  let path = CodexCredential.home(inProcessEnvironment: environment),
+                  seen.insert(path).inserted
+            else { continue }
+            paths.append(path)
+        }
+        return paths
+    }
+    #else
+    static func discoveredCodexHomes() -> [String] { [] }
+    #endif
 
     /// Turn one Codex rate_limit block into rows, shortest window first.
     /// Parse every named model bucket Codex sends. Unknown names are kept in
@@ -698,11 +797,11 @@ enum Fetcher {
         return candidates.filter { seen.insert($0.secret).inserted }
     }
 
-    private static func codexAuthData() -> Data? {
+    private static func codexAuthData(entry: CodexProfile.Entry) -> Data? {
         #if APP_STORE
-        return try? ProviderFolderAccess.shared.withFile(for: .codex) { try Data(contentsOf: $0) }
+        return try? CodexAccountAccess.shared.authData(for: entry)
         #else
-        return FileManager.default.contents(atPath: codexAuthPath)
+        return FileManager.default.contents(atPath: entry.authPath)
         #endif
     }
 
@@ -784,7 +883,10 @@ enum Fetcher {
     /// The store uses this, not the API, to decide when a token-rejected
     /// provider is worth polling again: a 401 lasts until the CLI writes a new
     /// token, and the only local sign that has happened is the expiry moving.
-    static func localTokenExpiry(_ providerID: String) -> Double? {
+    static func localTokenExpiry(
+        _ providerID: String,
+        codexTargets: [CodexProfile.Entry] = []
+    ) -> Double? {
         if providerID == ClaudeProfile.defaultKeychainService
             || providerID.hasPrefix(ClaudeProfile.keychainPrefix) {
             guard let blob = keychainSecret(service: providerID),
@@ -793,13 +895,22 @@ enum Fetcher {
             else { return nil }
             return ms / 1000  // stored in milliseconds
         }
-        switch providerID {
-        case codexID:
-            guard let raw = codexAuthData(),
-                  let tokens = json(raw)?["tokens"] as? [String: Any],
-                  let token = tokens["access_token"] as? String
+        if providerID == codexID || providerID.hasPrefix(CodexProfile.idPrefix) {
+            let entry = codexTargets.first { $0.id == providerID } ?? (providerID == codexID
+                ? CodexProfile.Entry(
+                    normalizedPath: CodexProfile.defaultNormalizedPath,
+                    providerID: CodexProfile.defaultID,
+                    source: .default,
+                    preferenceRank: 2
+                )
+                : nil)
+            guard let entry,
+                  let raw = codexAuthData(entry: entry),
+                  let auth = CodexProfile.parseAuth(raw)
             else { return nil }
-            return jwtExpiry(token)
+            return jwtExpiry(auth.accessToken)
+        }
+        switch providerID {
         case cursorID:
             if let saved = CursorKeychain.read(), let jwt = CursorCredential.session(from: saved)?.jwt {
                 return jwtExpiry(jwt)

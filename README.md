@@ -163,7 +163,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 | Provider | Credential | Endpoint |
 | --- | --- | --- |
 | Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+) | `GET api.anthropic.com/api/oauth/usage` |
-| Codex | `~/.codex/auth.json` (written by the Codex CLI) | `GET chatgpt.com/backend-api/codex/usage` |
+| Codex | One `auth.json` per Codex profile (`~/.codex`, or another `CODEX_HOME` folder) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
 | Cursor | signed-in Cursor app session, app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, or a running Conductor Cursor process | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
 
@@ -210,8 +210,14 @@ Worth understanding before running something that touches your API credentials.
   locally; OAuth tokens stay in Claude Code's Keychain items. The direct-download
   build may also notice a running Claude Code process and remember its profile
   after a valid credential is seen.
+- For a second Codex subscription, launch Codex with a separate home, for
+  example `CODEX_HOME=~/.codex-work codex`, and sign in there once. Add that
+  folder under **Codex accounts** in Settings. The direct-download build can
+  also notice a running Codex process with `CODEX_HOME` set; the App Store build
+  only reads folders you explicitly choose. Tokens remain in each profile's
+  `auth.json`.
 - Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
-  `~/.codex/auth.json`, a Cursor session from the Cursor app's Keychain item
+  each selected profile's `auth.json`, a Cursor session from the Cursor app's Keychain item
   `cursor-access-token` or `state.vscdb`, and an OpenRouter or Cursor key from
   the first available configured source. A key entered in Settings is stored in
   the app's own Keychain item.

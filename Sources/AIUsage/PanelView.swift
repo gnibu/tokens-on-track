@@ -118,6 +118,7 @@ private struct SettingsTab: View {
                     menuBarGroup
                     displayGroup
                     claudeAccountsGroup
+                    codexAccountsGroup
                     openRouterGroup
                     cursorGroup
                     providersGroup
@@ -150,12 +151,15 @@ private struct SettingsTab: View {
         ClaudeAccountsGroup()
     }
 
+    private var codexAccountsGroup: some View {
+        CodexAccountsGroup()
+    }
+
     #if APP_STORE
     private var connectionsGroup: some View {
         Group {
             groupTitle("Connections")
             DividedRows {
-                ProviderFolderRow(folder: .codex)
                 ProviderFolderRow(folder: .cursor)
                 ProviderConnectionInfo(
                     name: "Claude",

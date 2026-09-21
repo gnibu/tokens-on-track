@@ -76,7 +76,9 @@ struct ScopedModelLimit: Codable, Identifiable, Equatable {
 
     static func displayName(provider: String, model: String) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard provider.caseInsensitiveCompare("Codex") == .orderedSame else {
+        let codex = provider.caseInsensitiveCompare(CodexProfile.defaultID) == .orderedSame
+            || provider.hasPrefix(CodexProfile.idPrefix)
+        guard codex else {
             return trimmed
         }
         return trimmed.split(separator: "-").last.map(String.init) ?? trimmed
@@ -145,7 +147,7 @@ struct Provider: Codable, Identifiable, Equatable {
     var kind: String
     /// User-facing label (`Claude Personal`, `Codex`, …).
     var name: String
-    /// Non-default Claude Code profile directory, when applicable.
+    /// Claude Code or Codex profile directory, when applicable.
     var profilePath: String?
     var ok: Bool = false
     var plan: String?
@@ -196,9 +198,13 @@ struct Provider: Codable, Identifiable, Equatable {
         id = legacy.id
         kind = legacy.kind
         self.name = name
-        profilePath = legacy.kind == "claude" && id == ClaudeProfile.defaultKeychainService
-            ? ClaudeProfile.defaultNormalizedPath
-            : nil
+        if legacy.kind == "claude", id == ClaudeProfile.defaultKeychainService {
+            profilePath = ClaudeProfile.defaultNormalizedPath
+        } else if legacy.kind == "codex", id == CodexProfile.defaultID {
+            profilePath = CodexProfile.defaultNormalizedPath
+        } else {
+            profilePath = nil
+        }
     }
 
     init(
@@ -260,6 +266,9 @@ struct Provider: Codable, Identifiable, Equatable {
         profilePath = try? box.decodeIfPresent(String.self, forKey: .profilePath)
         if profilePath == nil, kind == "claude", id == ClaudeProfile.defaultKeychainService {
             profilePath = ClaudeProfile.defaultNormalizedPath
+        }
+        if profilePath == nil, kind == "codex", id == CodexProfile.defaultID {
+            profilePath = CodexProfile.defaultNormalizedPath
         }
         ok = (try? box.decode(Bool.self, forKey: .ok)) ?? false
         plan = try? box.decodeIfPresent(String.self, forKey: .plan)

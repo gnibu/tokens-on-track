@@ -23,6 +23,12 @@ enum RegressionTests {
         testClaudeLegacyProviderDecoding()
         testClaudeDuplicateTokenCollapse()
         testClaudeConfigDirFromEnvironment()
+        testCodexProfileIDsAndPaths()
+        testCodexCatalogMerging()
+        testCodexDefaultLabels()
+        testCodexAuthParsingAndDuplicateCollapse()
+        testCodexHomeFromEnvironment()
+        testMultipleCodexPollTargetOrdering()
         testCodexAdditionalLimitsAreParsedGenerically()
         testCodexMalformedAdditionalLimitsAreSkipped()
         testProviderSpecificModelDisplayNames()
@@ -272,6 +278,10 @@ enum RegressionTests {
         check(
             ScopedModelLimit(provider: "Codex", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
             "Codex limit names must retain their compact final segment"
+        )
+        check(
+            ScopedModelLimit(provider: "Codex-deadbeef", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
+            "additional Codex profiles must retain compact model names"
         )
         check(
             ScopedModelLimit(provider: "Claude", model: "claude-fable-5-1").displayName
@@ -1661,6 +1671,118 @@ enum RegressionTests {
             ClaudeCredential.configDir(inProcessEnvironment: environment)
                 == ClaudeProfile.normalizedPath("/Users/me/.claude-team"),
             "CLAUDE_CONFIG_DIR must be parsed and normalized"
+        )
+    }
+
+    private static func testCodexProfileIDsAndPaths() {
+        check(
+            CodexProfile.providerID(for: CodexProfile.defaultNormalizedPath) == "Codex",
+            "the default Codex profile must preserve its legacy provider id"
+        )
+        let work = CodexProfile.normalizedPath("~/work/../.codex-work")
+        check(work.hasSuffix("/.codex-work"), "Codex paths must expand and normalize without resolving symlinks")
+        check(
+            CodexProfile.providerID(for: work).hasPrefix(CodexProfile.idPrefix),
+            "a non-default Codex profile must receive a path-derived id"
+        )
+        check(
+            CodexProfile.providerID(for: work) == CodexProfile.providerID(for: work),
+            "a Codex profile id must be stable"
+        )
+    }
+
+    private static func testCodexCatalogMerging() {
+        let work = "/Users/test/.codex-work"
+        var catalog = CodexProfile.catalog(
+            configuredPaths: [work],
+            rememberedPaths: [],
+            discoveredPaths: [work],
+            ignoredPaths: [work]
+        )
+        check(catalog.count == 1, "an ignored Codex profile must stay out while the default remains")
+        catalog = CodexProfile.catalog(
+            configuredPaths: [work],
+            rememberedPaths: [work],
+            discoveredPaths: [work],
+            ignoredPaths: []
+        )
+        check(catalog.count == 2, "default and configured Codex profiles must merge without duplicates")
+        check(catalog[0].providerID == CodexProfile.defaultID, "the default Codex profile must stay first")
+    }
+
+    private static func testCodexDefaultLabels() {
+        check(
+            CodexProfile.defaultLabel(planType: "pro", customLabel: nil, profilePath: "/x")
+                == "Codex Personal",
+            "personal Codex plans must use the personal label"
+        )
+        check(
+            CodexProfile.defaultLabel(planType: "business", customLabel: nil, profilePath: "/x")
+                == "Codex Team",
+            "business Codex plans must use the team label"
+        )
+        check(
+            CodexProfile.defaultLabel(planType: "team", customLabel: "Client", profilePath: "/x")
+                == "Client",
+            "a custom Codex label must win over the plan default"
+        )
+    }
+
+    private static func testCodexAuthParsingAndDuplicateCollapse() {
+        let fixture = Data(#"{"tokens":{"access_token":"same-token","account_id":"acct_1"}}"#.utf8)
+        let auth = CodexProfile.parseAuth(fixture)
+        check(auth?.accountID == "acct_1", "Codex auth.json account ids must be parsed")
+
+        let personal = CodexProfile.Entry(
+            normalizedPath: CodexProfile.defaultNormalizedPath,
+            providerID: CodexProfile.defaultID,
+            source: .default,
+            preferenceRank: 2
+        )
+        let workPath = "/Users/test/.codex-work"
+        let work = CodexProfile.Entry(
+            normalizedPath: workPath,
+            providerID: CodexProfile.providerID(for: workPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let collapsed = CodexProfile.collapseDuplicateTokens([work, personal]) { _ in auth }
+        check(collapsed == [personal], "the default Codex profile must win duplicate credentials")
+    }
+
+    private static func testCodexHomeFromEnvironment() {
+        let processList = """
+        123 /opt/homebrew/bin/codex exec
+        456 node /usr/local/lib/node_modules/@openai/codex/bin/codex.js
+        789 /usr/bin/not-codex-helper
+        """
+        check(CodexCredential.codexPIDs(in: processList) == [123, 456], "Codex CLI processes must be detected")
+        let environment = "PATH=/usr/bin CODEX_HOME=/Users/me/.codex-work OTHER=x"
+        check(
+            CodexCredential.home(inProcessEnvironment: environment)
+                == CodexProfile.normalizedPath("/Users/me/.codex-work"),
+            "CODEX_HOME must be parsed and normalized"
+        )
+    }
+
+    private static func testMultipleCodexPollTargetOrdering() {
+        let defaultCodex = CodexProfile.Entry(
+            normalizedPath: CodexProfile.defaultNormalizedPath,
+            providerID: CodexProfile.defaultID,
+            source: .default,
+            preferenceRank: 2
+        )
+        let workPath = "/Users/test/.codex-work"
+        let workCodex = CodexProfile.Entry(
+            normalizedPath: workPath,
+            providerID: CodexProfile.providerID(for: workPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let ids = Fetcher.pollTargetIDs(claudeTargets: [], codexTargets: [defaultCodex, workCodex])
+        check(
+            ids == [defaultCodex.id, workCodex.id, Fetcher.openRouterID, Fetcher.cursorID],
+            "both Codex profiles must be independent poll targets in profile order"
         )
     }
 
