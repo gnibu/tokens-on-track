@@ -71,31 +71,23 @@ private struct CodexAccountRow: View {
     @ObservedObject private var preferences = Preferences.shared
     @EnvironmentObject private var store: UsageStore
     @State private var labelText: String = ""
+    @State private var committedLabelText: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                TextField("Label", text: $labelText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .onAppear { syncLabel() }
-                    .onSubmit { commitLabel() }
-                Spacer(minLength: 8)
-                if let plan = liveProvider?.plan, !plan.isEmpty {
-                    Text(plan.uppercased())
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Glass.ink(0.5))
-                }
-            }
+            AccountNicknameField(
+                text: $labelText,
+                plan: liveProvider?.plan,
+                onCommit: commitLabel
+            )
+            .onAppear { syncLabel() }
             Text(statusLine)
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
-            if entry.normalizedPath != CodexProfile.defaultNormalizedPath {
-                GlassLink(title: "Remove") {
-                    preferences.removeCodexProfile(path: entry.normalizedPath)
-                    store.connectionsChanged()
-                }
+            GlassLink(title: "Remove") {
+                preferences.removeCodexProfile(path: entry.normalizedPath)
+                store.connectionsChanged()
             }
         }
     }
@@ -122,17 +114,28 @@ private struct CodexAccountRow: View {
     }
 
     private func syncLabel() {
-        labelText = preferences.codexLabel(for: entry.normalizedPath)
+        let label = preferences.codexLabel(for: entry.normalizedPath)
             ?? liveProvider?.name
             ?? CodexProfile.defaultLabel(
                 planType: nil,
                 customLabel: nil,
                 profilePath: entry.normalizedPath
             )
+        labelText = label
+        committedLabelText = label
     }
 
     private func commitLabel() {
+        guard labelText != committedLabelText else { return }
         preferences.setCodexLabel(labelText, for: entry.normalizedPath)
+        let label = preferences.codexLabel(for: entry.normalizedPath)
+            ?? CodexProfile.defaultLabel(
+                planType: liveProvider?.plan,
+                customLabel: nil,
+                profilePath: entry.normalizedPath
+            )
+        labelText = label
+        committedLabelText = label
         store.connectionsChanged()
     }
 }

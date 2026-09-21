@@ -254,7 +254,6 @@ final class Preferences: ObservableObject {
 
     func removeClaudeProfile(path: String) {
         let normalized = ClaudeProfile.normalizedPath(path)
-        guard normalized != ClaudeProfile.defaultNormalizedPath else { return }
         claudeConfiguredPaths.removeAll { $0 == normalized }
         var remembered = claudeRememberedPaths
         remembered.remove(normalized)
@@ -321,7 +320,6 @@ final class Preferences: ObservableObject {
 
     func removeCodexProfile(path: String) {
         let normalized = CodexProfile.normalizedPath(path)
-        guard normalized != CodexProfile.defaultNormalizedPath else { return }
         codexConfiguredPaths.removeAll { $0 == normalized }
         var remembered = codexRememberedPaths
         remembered.remove(normalized)

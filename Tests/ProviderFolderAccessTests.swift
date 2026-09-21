@@ -141,6 +141,11 @@ enum ProviderFolderAccessTests {
                 try access.authData(for: defaultEntry) == Data("profile-auth".utf8),
                 "the legacy default Codex bookmark remains readable"
             )
+            access.removeBookmark(for: CodexProfile.defaultNormalizedPath)
+            require(
+                !access.isSelected(CodexProfile.defaultNormalizedPath),
+                "removing the default Codex profile forgets its legacy bookmark"
+            )
             require(starts == stops, "Codex profile reads release their security scopes")
             access.removeBookmark(for: path)
             require(!access.isSelected(path), "removing a Codex profile forgets its bookmark")

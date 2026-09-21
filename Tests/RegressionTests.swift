@@ -1585,6 +1585,13 @@ enum RegressionTests {
     private static func testClaudeCatalogMerging() {
         let discovered = "/Users/test/.claude-work"
         let ignored = ClaudeProfile.normalizedPath(discovered)
+        let withoutDefault = ClaudeProfile.catalog(
+            configuredPaths: [],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: [ClaudeProfile.defaultNormalizedPath]
+        )
+        check(withoutDefault.isEmpty, "removing the default Claude profile must hide it from the catalog")
         var catalog = ClaudeProfile.catalog(
             configuredPaths: [discovered],
             rememberedPaths: [],
@@ -1693,6 +1700,13 @@ enum RegressionTests {
 
     private static func testCodexCatalogMerging() {
         let work = "/Users/test/.codex-work"
+        let withoutDefault = CodexProfile.catalog(
+            configuredPaths: [],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: [CodexProfile.defaultNormalizedPath]
+        )
+        check(withoutDefault.isEmpty, "removing the default Codex profile must hide it from the catalog")
         var catalog = CodexProfile.catalog(
             configuredPaths: [work],
             rememberedPaths: [],
