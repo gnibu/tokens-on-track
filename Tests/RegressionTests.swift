@@ -16,6 +16,19 @@ enum RegressionTests {
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
+        testClaudeKeychainServiceDerivation()
+        testClaudePathNormalization()
+        testClaudeCatalogMerging()
+        testClaudeDefaultLabels()
+        testClaudeLegacyProviderDecoding()
+        testClaudeDuplicateTokenCollapse()
+        testClaudeConfigDirFromEnvironment()
+        testCodexProfileIDsAndPaths()
+        testCodexCatalogMerging()
+        testCodexDefaultLabels()
+        testCodexAuthParsingAndDuplicateCollapse()
+        testCodexHomeFromEnvironment()
+        testMultipleCodexPollTargetOrdering()
         testCodexAdditionalLimitsAreParsedGenerically()
         testCodexMalformedAdditionalLimitsAreSkipped()
         testProviderSpecificModelDisplayNames()
@@ -265,6 +278,10 @@ enum RegressionTests {
         check(
             ScopedModelLimit(provider: "Codex", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
             "Codex limit names must retain their compact final segment"
+        )
+        check(
+            ScopedModelLimit(provider: "Codex-deadbeef", model: "GPT-5.3-Codex-Spark").displayName == "Spark",
+            "additional Codex profiles must retain compact model names"
         )
         check(
             ScopedModelLimit(provider: "Claude", model: "claude-fable-5-1").displayName
@@ -874,7 +891,7 @@ enum RegressionTests {
         let claude = provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])
         let report = Report(providers: [claude, codex], date: now)
 
-        let hidClaude = report.displayProviders(hiding: ["Claude"])
+        let hidClaude = report.displayProviders(hiding: [ClaudeProfile.defaultKeychainService])
         check(hidClaude.map(\.name) == ["Codex"], "a hidden provider must be dropped")
     }
 
@@ -890,7 +907,10 @@ enum RegressionTests {
             UsageWindow(label: "5h (Fable)", percent: 30, windowSeconds: 5 * 3600, model: "Fable")
         )
         let report = Report(providers: [claude], date: now)
-        let fable = ScopedModelLimit.key(provider: "Claude", model: "Fable")
+        let fable = ScopedModelLimit.key(
+            provider: ClaudeProfile.defaultKeychainService,
+            model: "Fable"
+        )
         let shown = report.displayProviders(hidingModels: [fable])
 
         check(
@@ -1533,6 +1553,251 @@ enum RegressionTests {
 
         check(schedule.nextBoundary(after: before, calendar: calendar) == end, "18:00 is the next boundary")
         check(!schedule.isActive(at: end, calendar: calendar), "the schedule must be inactive at its end")
+    }
+
+    private static func testClaudeKeychainServiceDerivation() {
+        check(
+            ClaudeProfile.keychainService(for: ClaudeProfile.defaultNormalizedPath)
+                == ClaudeProfile.defaultKeychainService,
+            "the default profile must keep the legacy Keychain service name"
+        )
+        let teamPath = "/Users/test/.claude-team"
+        check(
+            ClaudeProfile.keychainService(for: teamPath)
+                == "Claude Code-credentials-\(ClaudeProfile.pathHashPrefix8(teamPath))",
+            "non-default profiles must use the hashed service suffix"
+        )
+    }
+
+    private static func testClaudePathNormalization() {
+        check(
+            ClaudeProfile.normalizedPath("~/foo/./bar/../baz")
+                == (("~/foo/baz" as NSString).expandingTildeInPath),
+            "normalization must expand ~ and drop . and .. without resolving symlinks"
+        )
+        let mixedCase = "/Users/Test/.Claude-Team"
+        check(
+            ClaudeProfile.normalizedPath(mixedCase) == mixedCase,
+            "normalization must preserve path case"
+        )
+    }
+
+    private static func testClaudeCatalogMerging() {
+        let discovered = "/Users/test/.claude-work"
+        let ignored = ClaudeProfile.normalizedPath(discovered)
+        let withoutDefault = ClaudeProfile.catalog(
+            configuredPaths: [],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: [ClaudeProfile.defaultNormalizedPath]
+        )
+        check(withoutDefault.isEmpty, "removing the default Claude profile must hide it from the catalog")
+        var catalog = ClaudeProfile.catalog(
+            configuredPaths: [discovered],
+            rememberedPaths: [],
+            discoveredPaths: [discovered],
+            ignoredPaths: [ignored]
+        )
+        check(
+            !catalog.contains(where: { $0.normalizedPath == ignored }),
+            "ignored paths must stay out until the user adds them again"
+        )
+        catalog = ClaudeProfile.catalog(
+            configuredPaths: [discovered],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: []
+        )
+        check(catalog.count >= 2, "default and configured profiles must both appear")
+    }
+
+    private static func testClaudeDefaultLabels() {
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "max", customLabel: nil, profilePath: "/x")
+                == "Claude Personal",
+            "personal plans must default to Claude Personal"
+        )
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "team", customLabel: nil, profilePath: "/x")
+                == "Claude Team",
+            "team plans must default to Claude Team"
+        )
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "team", customLabel: "Work", profilePath: "/x")
+                == "Work",
+            "a custom label must win over subscription defaults"
+        )
+    }
+
+    private static func testClaudeLegacyProviderDecoding() {
+        let json = """
+        {"name":"Claude","ok":true,"windows":[{"label":"5h","percent":40}]}
+        """
+        guard let provider = try? JSONDecoder().decode(Provider.self, from: Data(json.utf8)) else {
+            check(false, "legacy provider JSON must decode")
+            return
+        }
+        check(provider.id == ClaudeProfile.defaultKeychainService, "legacy Claude rows must map to the default profile id")
+        check(provider.kind == "claude", "legacy Claude rows must gain the claude kind")
+    }
+
+    private static func testClaudeDuplicateTokenCollapse() {
+        let personal = ClaudeProfile.Entry(
+            normalizedPath: ClaudeProfile.defaultNormalizedPath,
+            keychainService: ClaudeProfile.defaultKeychainService,
+            source: .default,
+            preferenceRank: 2
+        )
+        let teamPath = "/Users/test/.claude-team"
+        let team = ClaudeProfile.Entry(
+            normalizedPath: teamPath,
+            keychainService: ClaudeProfile.keychainService(for: teamPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let token = "same-access-token"
+        let collapsed = ClaudeProfile.collapseDuplicateTokens([team, personal]) { _ in
+            ClaudeProfile.OAuthSnapshot(accessToken: token, subscriptionType: "team", expiresAtMs: nil)
+        }
+        check(collapsed.count == 1, "duplicate access tokens must collapse to one profile")
+        check(
+            collapsed[0].normalizedPath == personal.normalizedPath,
+            "the default profile must win an otherwise equal duplicate-token tie"
+        )
+    }
+
+    private static func testClaudeConfigDirFromEnvironment() {
+        let processList = """
+        123 /Users/me/.local/bin/claude chat
+        456 node /path/to/claude-code/cli.js
+        789 /Users/me/.local/bin/claude --chrome-native-host
+        """
+        check(ClaudeCredential.claudePIDs(in: processList) == [123, 456], "Claude Code processes must be detected")
+        let environment = "PATH=/usr/bin CLAUDE_CONFIG_DIR=/Users/me/.claude-team OTHER=x"
+        check(
+            ClaudeCredential.configDir(inProcessEnvironment: environment)
+                == ClaudeProfile.normalizedPath("/Users/me/.claude-team"),
+            "CLAUDE_CONFIG_DIR must be parsed and normalized"
+        )
+    }
+
+    private static func testCodexProfileIDsAndPaths() {
+        check(
+            CodexProfile.providerID(for: CodexProfile.defaultNormalizedPath) == "Codex",
+            "the default Codex profile must preserve its legacy provider id"
+        )
+        let work = CodexProfile.normalizedPath("~/work/../.codex-work")
+        check(work.hasSuffix("/.codex-work"), "Codex paths must expand and normalize without resolving symlinks")
+        check(
+            CodexProfile.providerID(for: work).hasPrefix(CodexProfile.idPrefix),
+            "a non-default Codex profile must receive a path-derived id"
+        )
+        check(
+            CodexProfile.providerID(for: work) == CodexProfile.providerID(for: work),
+            "a Codex profile id must be stable"
+        )
+    }
+
+    private static func testCodexCatalogMerging() {
+        let work = "/Users/test/.codex-work"
+        let withoutDefault = CodexProfile.catalog(
+            configuredPaths: [],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: [CodexProfile.defaultNormalizedPath]
+        )
+        check(withoutDefault.isEmpty, "removing the default Codex profile must hide it from the catalog")
+        var catalog = CodexProfile.catalog(
+            configuredPaths: [work],
+            rememberedPaths: [],
+            discoveredPaths: [work],
+            ignoredPaths: [work]
+        )
+        check(catalog.count == 1, "an ignored Codex profile must stay out while the default remains")
+        catalog = CodexProfile.catalog(
+            configuredPaths: [work],
+            rememberedPaths: [work],
+            discoveredPaths: [work],
+            ignoredPaths: []
+        )
+        check(catalog.count == 2, "default and configured Codex profiles must merge without duplicates")
+        check(catalog[0].providerID == CodexProfile.defaultID, "the default Codex profile must stay first")
+    }
+
+    private static func testCodexDefaultLabels() {
+        check(
+            CodexProfile.defaultLabel(planType: "pro", customLabel: nil, profilePath: "/x")
+                == "Codex Personal",
+            "personal Codex plans must use the personal label"
+        )
+        check(
+            CodexProfile.defaultLabel(planType: "business", customLabel: nil, profilePath: "/x")
+                == "Codex Team",
+            "business Codex plans must use the team label"
+        )
+        check(
+            CodexProfile.defaultLabel(planType: "team", customLabel: "Client", profilePath: "/x")
+                == "Client",
+            "a custom Codex label must win over the plan default"
+        )
+    }
+
+    private static func testCodexAuthParsingAndDuplicateCollapse() {
+        let fixture = Data(#"{"tokens":{"access_token":"same-token","account_id":"acct_1"}}"#.utf8)
+        let auth = CodexProfile.parseAuth(fixture)
+        check(auth?.accountID == "acct_1", "Codex auth.json account ids must be parsed")
+
+        let personal = CodexProfile.Entry(
+            normalizedPath: CodexProfile.defaultNormalizedPath,
+            providerID: CodexProfile.defaultID,
+            source: .default,
+            preferenceRank: 2
+        )
+        let workPath = "/Users/test/.codex-work"
+        let work = CodexProfile.Entry(
+            normalizedPath: workPath,
+            providerID: CodexProfile.providerID(for: workPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let collapsed = CodexProfile.collapseDuplicateTokens([work, personal]) { _ in auth }
+        check(collapsed == [personal], "the default Codex profile must win duplicate credentials")
+    }
+
+    private static func testCodexHomeFromEnvironment() {
+        let processList = """
+        123 /opt/homebrew/bin/codex exec
+        456 node /usr/local/lib/node_modules/@openai/codex/bin/codex.js
+        789 /usr/bin/not-codex-helper
+        """
+        check(CodexCredential.codexPIDs(in: processList) == [123, 456], "Codex CLI processes must be detected")
+        let environment = "PATH=/usr/bin CODEX_HOME=/Users/me/.codex-work OTHER=x"
+        check(
+            CodexCredential.home(inProcessEnvironment: environment)
+                == CodexProfile.normalizedPath("/Users/me/.codex-work"),
+            "CODEX_HOME must be parsed and normalized"
+        )
+    }
+
+    private static func testMultipleCodexPollTargetOrdering() {
+        let defaultCodex = CodexProfile.Entry(
+            normalizedPath: CodexProfile.defaultNormalizedPath,
+            providerID: CodexProfile.defaultID,
+            source: .default,
+            preferenceRank: 2
+        )
+        let workPath = "/Users/test/.codex-work"
+        let workCodex = CodexProfile.Entry(
+            normalizedPath: workPath,
+            providerID: CodexProfile.providerID(for: workPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let ids = Fetcher.pollTargetIDs(claudeTargets: [], codexTargets: [defaultCodex, workCodex])
+        check(
+            ids == [defaultCodex.id, workCodex.id, Fetcher.openRouterID, Fetcher.cursorID],
+            "both Codex profiles must be independent poll targets in profile order"
+        )
     }
 
     // ----------------------------------------------------------------- //

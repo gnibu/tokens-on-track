@@ -2,6 +2,11 @@ import Foundation
 
 enum ProviderFolderAccessTests {
     static func run() {
+        runProviderFolders()
+        runCodexProfiles()
+    }
+
+    private static func runProviderFolders() {
         let suite = "ProviderFolderAccessTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
@@ -86,6 +91,65 @@ enum ProviderFolderAccessTests {
             require(!access.isSelected(.codex), "remove forgets the grant")
             expectFailure("removed grant") { try access.withFile(for: .codex) { _ in fatalError("read after remove") } }
         } catch { fatalError("Folder access tests: \(error)") }
+    }
+
+    private static func runCodexProfiles() {
+        let suite = "CodexAccountAccessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let auth = root.appendingPathComponent(CodexProfile.authFileName)
+            try Data("profile-auth".utf8).write(to: auth)
+            var starts = 0
+            var stops = 0
+            let operations = ProviderFolderAccess.BookmarkOperations(
+                create: { Data($0.path.utf8) },
+                resolve: { data in
+                    guard let path = String(data: data, encoding: .utf8) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    return (URL(fileURLWithPath: path), false)
+                },
+                start: { _ in starts += 1; return true },
+                stop: { _ in stops += 1 }
+            )
+            let access = CodexAccountAccess(defaults: defaults, bookmarks: operations)
+            let path = try access.select(root)
+            let entry = CodexProfile.Entry(
+                normalizedPath: path,
+                providerID: CodexProfile.providerID(for: path),
+                source: .configured,
+                preferenceRank: 1
+            )
+            require(access.isSelected(path), "Codex profile bookmark persists")
+            require(try access.authData(for: entry) == Data("profile-auth".utf8), "Codex profile auth is readable")
+
+            // Existing Store installs saved the default profile under this key.
+            defaults.set(Data(root.path.utf8), forKey: ProviderFolder.codex.bookmarkKey)
+            let defaultEntry = CodexProfile.Entry(
+                normalizedPath: CodexProfile.defaultNormalizedPath,
+                providerID: CodexProfile.defaultID,
+                source: .default,
+                preferenceRank: 2
+            )
+            require(
+                try access.authData(for: defaultEntry) == Data("profile-auth".utf8),
+                "the legacy default Codex bookmark remains readable"
+            )
+            access.removeBookmark(for: CodexProfile.defaultNormalizedPath)
+            require(
+                !access.isSelected(CodexProfile.defaultNormalizedPath),
+                "removing the default Codex profile forgets its legacy bookmark"
+            )
+            require(starts == stops, "Codex profile reads release their security scopes")
+            access.removeBookmark(for: path)
+            require(!access.isSelected(path), "removing a Codex profile forgets its bookmark")
+        } catch { fatalError("Codex account access tests: \(error)") }
     }
 
     private static func require(_ value: Bool, _ message: String) {

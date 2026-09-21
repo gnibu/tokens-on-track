@@ -160,10 +160,50 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(showCursorCosts, forKey: Keys.showCursorCosts) }
     }
 
-    /// Providers the user has chosen not to see, by name. A never-set-up
+    /// Providers the user has chosen not to see, by stable id. A never-set-up
     /// provider is hidden automatically; this is for hiding one you *do* have.
     @Published var hiddenProviders: Set<String> {
         didSet { defaults.set(Array(hiddenProviders), forKey: Keys.hiddenProviders) }
+    }
+
+    @Published private(set) var claudeConfiguredPaths: [String] {
+        didSet { defaults.set(claudeConfiguredPaths, forKey: Keys.claudeConfiguredPaths) }
+    }
+
+    @Published private(set) var claudeRememberedPaths: Set<String> {
+        didSet { defaults.set(Array(claudeRememberedPaths), forKey: Keys.claudeRememberedPaths) }
+    }
+
+    @Published private(set) var claudeIgnoredPaths: Set<String> {
+        didSet { defaults.set(Array(claudeIgnoredPaths), forKey: Keys.claudeIgnoredPaths) }
+    }
+
+    @Published var claudeCustomLabels: [String: String] {
+        didSet {
+            if let encoded = try? JSONEncoder().encode(claudeCustomLabels) {
+                defaults.set(encoded, forKey: Keys.claudeCustomLabels)
+            }
+        }
+    }
+
+    @Published private(set) var codexConfiguredPaths: [String] {
+        didSet { defaults.set(codexConfiguredPaths, forKey: Keys.codexConfiguredPaths) }
+    }
+
+    @Published private(set) var codexRememberedPaths: Set<String> {
+        didSet { defaults.set(Array(codexRememberedPaths), forKey: Keys.codexRememberedPaths) }
+    }
+
+    @Published private(set) var codexIgnoredPaths: Set<String> {
+        didSet { defaults.set(Array(codexIgnoredPaths), forKey: Keys.codexIgnoredPaths) }
+    }
+
+    @Published var codexCustomLabels: [String: String] {
+        didSet {
+            if let encoded = try? JSONEncoder().encode(codexCustomLabels) {
+                defaults.set(encoded, forKey: Keys.codexCustomLabels)
+            }
+        }
     }
 
     /// Provider/model pairs whose structured quota rows the user has hidden.
@@ -184,8 +224,139 @@ final class Preferences: ObservableObject {
         }
     }
 
-    func setProvider(_ name: String, hidden: Bool) {
-        if hidden { hiddenProviders.insert(name) } else { hiddenProviders.remove(name) }
+    func setProvider(_ id: String, hidden: Bool) {
+        if hidden { hiddenProviders.insert(id) } else { hiddenProviders.remove(id) }
+    }
+
+    func claudeLabel(for path: String) -> String? {
+        claudeCustomLabels[ClaudeProfile.normalizedPath(path)]
+    }
+
+    func setClaudeLabel(_ label: String?, for path: String) {
+        let key = ClaudeProfile.normalizedPath(path)
+        var next = claudeCustomLabels
+        if let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            next[key] = trimmed
+        } else {
+            next.removeValue(forKey: key)
+        }
+        claudeCustomLabels = next
+    }
+
+    func addClaudeProfile(path: String) {
+        let normalized = ClaudeProfile.normalizedPath(path)
+        guard !claudeConfiguredPaths.contains(normalized) else { return }
+        claudeConfiguredPaths.append(normalized)
+        var ignored = claudeIgnoredPaths
+        ignored.remove(normalized)
+        claudeIgnoredPaths = ignored
+    }
+
+    func removeClaudeProfile(path: String) {
+        let normalized = ClaudeProfile.normalizedPath(path)
+        claudeConfiguredPaths.removeAll { $0 == normalized }
+        var remembered = claudeRememberedPaths
+        remembered.remove(normalized)
+        claudeRememberedPaths = remembered
+        var ignored = claudeIgnoredPaths
+        ignored.insert(normalized)
+        claudeIgnoredPaths = ignored
+        ClaudeAccountAccess.shared.removeBookmark(for: normalized)
+        var labels = claudeCustomLabels
+        labels.removeValue(forKey: normalized)
+        claudeCustomLabels = labels
+    }
+
+    func rememberClaudeProfile(_ path: String) {
+        let normalized = ClaudeProfile.normalizedPath(path)
+        guard !claudeRememberedPaths.contains(normalized) else { return }
+        var next = claudeRememberedPaths
+        next.insert(normalized)
+        claudeRememberedPaths = next
+    }
+
+    var claudePollingContext: ClaudePollingContext {
+        ClaudePollingContext(
+            configuredPaths: claudeConfiguredPaths,
+            rememberedPaths: claudeRememberedPaths,
+            ignoredPaths: claudeIgnoredPaths,
+            label: { [self] in claudeLabel(for: $0) }
+        )
+    }
+
+    func claudeSettingsEntries(discoveredPaths: [String] = []) -> [ClaudeProfile.Entry] {
+        ClaudeProfile.catalog(
+            configuredPaths: claudeConfiguredPaths,
+            rememberedPaths: claudeRememberedPaths,
+            discoveredPaths: discoveredPaths,
+            ignoredPaths: claudeIgnoredPaths
+        )
+    }
+
+    func codexLabel(for path: String) -> String? {
+        codexCustomLabels[CodexProfile.normalizedPath(path)]
+    }
+
+    func setCodexLabel(_ label: String?, for path: String) {
+        let key = CodexProfile.normalizedPath(path)
+        var next = codexCustomLabels
+        if let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            next[key] = trimmed
+        } else {
+            next.removeValue(forKey: key)
+        }
+        codexCustomLabels = next
+    }
+
+    func addCodexProfile(path: String) {
+        let normalized = CodexProfile.normalizedPath(path)
+        if !codexConfiguredPaths.contains(normalized) {
+            codexConfiguredPaths.append(normalized)
+        }
+        var ignored = codexIgnoredPaths
+        ignored.remove(normalized)
+        codexIgnoredPaths = ignored
+    }
+
+    func removeCodexProfile(path: String) {
+        let normalized = CodexProfile.normalizedPath(path)
+        codexConfiguredPaths.removeAll { $0 == normalized }
+        var remembered = codexRememberedPaths
+        remembered.remove(normalized)
+        codexRememberedPaths = remembered
+        var ignored = codexIgnoredPaths
+        ignored.insert(normalized)
+        codexIgnoredPaths = ignored
+        CodexAccountAccess.shared.removeBookmark(for: normalized)
+        var labels = codexCustomLabels
+        labels.removeValue(forKey: normalized)
+        codexCustomLabels = labels
+    }
+
+    func rememberCodexProfile(_ path: String) {
+        let normalized = CodexProfile.normalizedPath(path)
+        guard !codexRememberedPaths.contains(normalized) else { return }
+        var next = codexRememberedPaths
+        next.insert(normalized)
+        codexRememberedPaths = next
+    }
+
+    var codexPollingContext: CodexPollingContext {
+        CodexPollingContext(
+            configuredPaths: codexConfiguredPaths,
+            rememberedPaths: codexRememberedPaths,
+            ignoredPaths: codexIgnoredPaths,
+            label: { [self] in codexLabel(for: $0) }
+        )
+    }
+
+    func codexSettingsEntries(discoveredPaths: [String] = []) -> [CodexProfile.Entry] {
+        CodexProfile.catalog(
+            configuredPaths: codexConfiguredPaths,
+            rememberedPaths: codexRememberedPaths,
+            discoveredPaths: discoveredPaths,
+            ignoredPaths: codexIgnoredPaths
+        )
     }
 
     func setModelLimit(provider: String, model: String, hidden: Bool) {
@@ -226,6 +397,15 @@ final class Preferences: ObservableObject {
         static let cursorMonthlyBudget = "cursorMonthlyBudget"
         static let showCursorCosts = "showCursorCosts"
         static let hiddenProviders = "hiddenProviders"
+        static let claudeConfiguredPaths = "claudeConfiguredPaths"
+        static let claudeRememberedPaths = "claudeRememberedPaths"
+        static let claudeIgnoredPaths = "claudeIgnoredPaths"
+        static let claudeCustomLabels = "claudeCustomLabels"
+        static let migratedClaudeProviderIDs = "migratedClaudeProviderIDs"
+        static let codexConfiguredPaths = "codexConfiguredPaths"
+        static let codexRememberedPaths = "codexRememberedPaths"
+        static let codexIgnoredPaths = "codexIgnoredPaths"
+        static let codexCustomLabels = "codexCustomLabels"
         static let hiddenModelLimits = "hiddenModelLimits"
         static let knownModelLimits = "knownModelLimits"
         static let migratedCodexModelLimits = "migratedCodexModelLimits"
@@ -306,6 +486,16 @@ final class Preferences: ObservableObject {
         }
         showCursorCosts = defaults.bool(forKey: Keys.showCursorCosts)
         hiddenProviders = Set(defaults.stringArray(forKey: Keys.hiddenProviders) ?? [])
+        claudeConfiguredPaths = defaults.stringArray(forKey: Keys.claudeConfiguredPaths) ?? []
+        claudeRememberedPaths = Set(defaults.stringArray(forKey: Keys.claudeRememberedPaths) ?? [])
+        claudeIgnoredPaths = Set(defaults.stringArray(forKey: Keys.claudeIgnoredPaths) ?? [])
+        claudeCustomLabels = defaults.data(forKey: Keys.claudeCustomLabels)
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        codexConfiguredPaths = defaults.stringArray(forKey: Keys.codexConfiguredPaths) ?? []
+        codexRememberedPaths = Set(defaults.stringArray(forKey: Keys.codexRememberedPaths) ?? [])
+        codexIgnoredPaths = Set(defaults.stringArray(forKey: Keys.codexIgnoredPaths) ?? [])
+        codexCustomLabels = defaults.data(forKey: Keys.codexCustomLabels)
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
         var hiddenModels = Set(defaults.stringArray(forKey: Keys.hiddenModelLimits) ?? [])
         var knownModels = defaults.data(forKey: Keys.knownModelLimits)
             .flatMap { try? JSONDecoder().decode([ScopedModelLimit].self, from: $0) } ?? []
@@ -349,6 +539,23 @@ final class Preferences: ObservableObject {
         knownModelLimits = knownModels
         if let encoded = try? JSONEncoder().encode(knownModels) {
             defaults.set(encoded, forKey: Keys.knownModelLimits)
+        }
+
+        if !defaults.bool(forKey: Keys.migratedClaudeProviderIDs) {
+            if hiddenProviders.remove("Claude") != nil {
+                hiddenProviders.insert(ClaudeProfile.defaultKeychainService)
+            }
+            let defaultID = ClaudeProfile.defaultKeychainService
+            hiddenModelLimits = Set(hiddenModelLimits.map { key in
+                let parts = key.split(separator: "\u{1}", maxSplits: 1).map(String.init)
+                guard parts.count == 2, parts[0] == "claude" else { return key }
+                return ScopedModelLimit.key(provider: defaultID, model: parts[1])
+            })
+            knownModelLimits = knownModelLimits.map { limit in
+                guard limit.provider.caseInsensitiveCompare("Claude") == .orderedSame else { return limit }
+                return ScopedModelLimit(provider: defaultID, model: limit.model)
+            }
+            defaults.set(true, forKey: Keys.migratedClaudeProviderIDs)
         }
     }
 

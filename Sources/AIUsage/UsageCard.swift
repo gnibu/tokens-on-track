@@ -31,6 +31,14 @@ struct RowMetrics {
     )
 }
 
+private func providerShowsCost(_ provider: Provider, preferences: Preferences) -> Bool {
+    switch provider.kind {
+    case "cursor": return preferences.showCursorCosts
+    case "openrouter": return preferences.showOpenRouterCosts
+    default: return false
+    }
+}
+
 // --------------------------------------------------------------------- //
 
 /// 1a — the free-standing glass card: summary line, hairline, then a block per
@@ -73,9 +81,7 @@ struct DesktopUsageCard: View {
                         metrics: .card,
                         mode: preferences.percentMode,
                         timing: timing,
-                        showsCost: provider.name == "Cursor"
-                            ? preferences.showCursorCosts
-                            : preferences.showOpenRouterCosts,
+                        showsCost: providerShowsCost(provider, preferences: preferences),
                         worstRow: verdict.rowKey
                     )
                 }
@@ -174,9 +180,7 @@ struct MenuUsageView: View {
                             mode: preferences.percentMode,
                             timing: timing,
                             showsNote: false,
-                            showsCost: provider.name == "Cursor"
-                                ? preferences.showCursorCosts
-                                : preferences.showOpenRouterCosts,
+                            showsCost: providerShowsCost(provider, preferences: preferences),
                             worstRow: verdict.rowKey
                         )
                     }
@@ -312,7 +316,7 @@ struct ProviderBlock: View {
 
     /// Rows sit under the provider name, not under the mark — icon + gap from the header.
     private var rowLeadingInset: CGFloat {
-        BrandGlyph.width(for: provider.name, height: metrics.markSize) + 9
+        BrandGlyph.width(for: provider.kind, height: metrics.markSize) + 9
     }
 
     var body: some View {
@@ -320,7 +324,7 @@ struct ProviderBlock: View {
 
         VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
             HStack(alignment: .firstTextBaseline, spacing: 9) {
-                BrandMark(provider: provider.name, size: metrics.markSize)
+                BrandMark(provider: provider.kind, size: metrics.markSize)
                     // Marks are centred on their own box, names sit on a
                     // baseline; aligning the two by eye keeps the row level.
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - metrics.markSize * 0.14 }

@@ -21,6 +21,9 @@ swiftc -parse-as-library "$@" \
     Sources/AIUsage/CursorKeychain.swift \
     Sources/AIUsage/WorkSchedule.swift \
     Sources/AIUsage/Pace.swift \
+    Sources/AIUsage/ClaudeProfile.swift \
+    Sources/AIUsage/CodexProfile.swift \
+    Sources/AIUsage/CodexAccountAccess.swift \
     Sources/AIUsage/Fetcher.swift \
     Sources/AIUsage/ProviderFolderAccess.swift \
     Sources/AIUsage/BrandGlyph.swift \
