@@ -245,7 +245,7 @@ enum CursorCredential {
     }
 
     static func reconnectMessage(for provider: Provider) -> String? {
-        guard provider.name == "Cursor",
+        guard provider.kind == "cursor",
               provider.error == CursorBudget.notConnectedMessage
         else { return nil }
         if provider.credentialSource == .cursorApp {

@@ -10,6 +10,10 @@ published with generated notes on the
 
 ### Added
 
+- Multiple Claude Code profiles at once — for example Claude Personal beside
+  Claude Team — each with its own quota rows, labels, visibility, and plan badge.
+  The direct-download build can also notice running Claude Code processes;
+  live Team verification still needs a volunteer tester.
 - Claude and Codex model-specific quota rows, such as `week (Fable)` and
   `week (Spark)`, discovered from provider responses. Each discovered model is
   shown by default, remembered across responses that omit it, and can be hidden

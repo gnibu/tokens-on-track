@@ -162,7 +162,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 
 | Provider | Credential | Endpoint |
 | --- | --- | --- |
-| Claude | Keychain item `Claude Code-credentials` (written by Claude Code) | `GET api.anthropic.com/api/oauth/usage` |
+| Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+) | `GET api.anthropic.com/api/oauth/usage` |
 | Codex | `~/.codex/auth.json` (written by the Codex CLI) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
 | Cursor | signed-in Cursor app session, app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, or a running Conductor Cursor process | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
@@ -204,6 +204,12 @@ Which windows appear depends on what each API returns for your plan:
 
 Worth understanding before running something that touches your API credentials.
 
+- For a second Claude subscription, create another Claude Code profile with
+  `CLAUDE_CONFIG_DIR` pointing at a separate folder, sign into it once, then add
+  that folder under **Claude accounts** in Settings. Profile paths are stored
+  locally; OAuth tokens stay in Claude Code's Keychain items. The direct-download
+  build may also notice a running Claude Code process and remember its profile
+  after a valid credential is seen.
 - Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
   `~/.codex/auth.json`, a Cursor session from the Cursor app's Keychain item
   `cursor-access-token` or `state.vscdb`, and an OpenRouter or Cursor key from

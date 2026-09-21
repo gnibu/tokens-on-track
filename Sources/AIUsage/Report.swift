@@ -139,7 +139,14 @@ enum ModelLimitMigration {
 }
 
 struct Provider: Codable, Identifiable, Equatable {
+    /// Stable identity for scheduling, visibility, and cache carry-over.
+    var id: String
+    /// Brand glyph lookup (`claude`, `codex`, …).
+    var kind: String
+    /// User-facing label (`Claude Personal`, `Codex`, …).
     var name: String
+    /// Non-default Claude Code profile directory, when applicable.
+    var profilePath: String?
     var ok: Bool = false
     var plan: String?
     var error: String?
@@ -167,10 +174,11 @@ struct Provider: Codable, Identifiable, Equatable {
     /// shown in Settings and harmless in the cache.
     var credentialSource: OpenRouterCredential.Source?
 
-    var id: String { name }
-
     enum CodingKeys: String, CodingKey {
+        case id
+        case kind
         case name
+        case profilePath = "profile_path"
         case ok
         case plan
         case error
@@ -184,7 +192,36 @@ struct Provider: Codable, Identifiable, Equatable {
     }
 
     init(name: String) {
+        let legacy = Self.legacyIdentity(for: name)
+        id = legacy.id
+        kind = legacy.kind
         self.name = name
+        profilePath = legacy.kind == "claude" && id == ClaudeProfile.defaultKeychainService
+            ? ClaudeProfile.defaultNormalizedPath
+            : nil
+    }
+
+    init(
+        id: String,
+        kind: String,
+        name: String,
+        profilePath: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.profilePath = profilePath
+    }
+
+    static func legacyIdentity(for name: String) -> (id: String, kind: String) {
+        switch name {
+        case "Claude":
+            return (ClaudeProfile.defaultKeychainService, "claude")
+        case "Codex": return ("Codex", "codex")
+        case "OpenRouter": return ("OpenRouter", "openrouter")
+        case "Cursor": return ("Cursor", "cursor")
+        default: return (name, name.lowercased())
+        }
     }
 
     /// Whether the rows are worth drawing. A stale reading that is all but zero
@@ -205,12 +242,25 @@ struct Provider: Codable, Identifiable, Equatable {
     /// there is nothing to draw until Settings supplies one.
     var needsBudget: Bool {
         error == OpenRouterBudget.missingBudgetMessage
-            && (name == "OpenRouter" || name == "Cursor")
+            && (kind == "openrouter" || kind == "cursor")
     }
 
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         name = (try? box.decode(String.self, forKey: .name)) ?? "?"
+        if let decodedID = try? box.decode(String.self, forKey: .id),
+           let decodedKind = try? box.decode(String.self, forKey: .kind) {
+            id = decodedID
+            kind = decodedKind
+        } else {
+            let legacy = Self.legacyIdentity(for: name)
+            id = legacy.id
+            kind = legacy.kind
+        }
+        profilePath = try? box.decodeIfPresent(String.self, forKey: .profilePath)
+        if profilePath == nil, kind == "claude", id == ClaudeProfile.defaultKeychainService {
+            profilePath = ClaudeProfile.defaultNormalizedPath
+        }
         ok = (try? box.decode(Bool.self, forKey: .ok)) ?? false
         plan = try? box.decodeIfPresent(String.self, forKey: .plan)
         error = try? box.decodeIfPresent(String.self, forKey: .error)
@@ -272,7 +322,7 @@ struct Report: Codable, Equatable {
         var merged = self
         merged.providers = providers.map { provider in
             guard !provider.ok,
-                  let old = previous.providers.first(where: { $0.name == provider.name }),
+                  let old = previous.providers.first(where: { $0.id == provider.id }),
                   old.ok
             else { return provider }
 
@@ -326,12 +376,12 @@ struct Report: Codable, Equatable {
         hidingModels hiddenModels: Set<String> = []
     ) -> [Provider] {
         visibleProviders.compactMap { provider in
-            guard !hiddenNames.contains(provider.name) else { return nil }
+            guard !hiddenNames.contains(provider.id) else { return nil }
             guard !hiddenModels.isEmpty else { return provider }
             var trimmed = provider
             trimmed.windows = provider.windows.filter {
                 guard let model = $0.model else { return true }
-                let key = ScopedModelLimit.key(provider: provider.name, model: model)
+                let key = ScopedModelLimit.key(provider: provider.id, model: model)
                 return !hiddenModels.contains(key)
             }
             return trimmed
@@ -359,7 +409,7 @@ struct Report: Codable, Equatable {
     /// not masquerade as a freshly measured report.
     func rebudgetingOpenRouter(monthlyBudget: Double?, now: Date = Date()) -> Report {
         var copy = self
-        guard let index = copy.providers.firstIndex(where: { $0.name == "OpenRouter" }) else {
+        guard let index = copy.providers.firstIndex(where: { $0.kind == "openrouter" }) else {
             return copy
         }
         var provider = copy.providers[index]
@@ -401,7 +451,7 @@ struct Report: Codable, Equatable {
     /// left alone — only the Admin-key spend mapping uses this path.
     func rebudgetingCursor(monthlyBudget: Double?, now: Date = Date()) -> Report {
         var copy = self
-        guard let index = copy.providers.firstIndex(where: { $0.name == "Cursor" }) else {
+        guard let index = copy.providers.firstIndex(where: { $0.kind == "cursor" }) else {
             return copy
         }
         var provider = copy.providers[index]
@@ -444,7 +494,7 @@ struct Report: Codable, Equatable {
                 guard let model = window.model?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !model.isEmpty
                 else { continue }
-                let limit = ScopedModelLimit(provider: provider.name, model: model)
+                let limit = ScopedModelLimit(provider: provider.id, model: model)
                 if seen.insert(limit.id).inserted { result.append(limit) }
             }
         }
@@ -516,7 +566,7 @@ struct Report: Codable, Equatable {
         guard fairShare else { return Array(ranked.prefix(limit)) }
 
         var claimed = Set<String>()
-        let leading = ranked.filter { claimed.insert($0.provider.name).inserted }
+        let leading = ranked.filter { claimed.insert($0.provider.id).inserted }
         let taken = Set(leading.map(Self.key))
         return Array((leading + ranked.filter { !taken.contains(Self.key($0)) }).prefix(limit))
     }
@@ -524,7 +574,7 @@ struct Report: Codable, Equatable {
     /// Provider and window labels are each unique within a reading, but only
     /// together do they identify one row.
     static func rowKey(provider: Provider, window: UsageWindow) -> String {
-        provider.name + "\u{1}" + window.id
+        provider.id + "\u{1}" + window.id
     }
 
     private static func key(_ pair: (provider: Provider, window: UsageWindow)) -> String {

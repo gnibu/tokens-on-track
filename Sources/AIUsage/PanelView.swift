@@ -117,6 +117,7 @@ private struct SettingsTab: View {
                     #endif
                     menuBarGroup
                     displayGroup
+                    claudeAccountsGroup
                     openRouterGroup
                     cursorGroup
                     providersGroup
@@ -144,6 +145,10 @@ private struct SettingsTab: View {
     }
 
     // ----------------------------------------------------------------- //
+
+    private var claudeAccountsGroup: some View {
+        ClaudeAccountsGroup()
+    }
 
     #if APP_STORE
     private var connectionsGroup: some View {
@@ -651,9 +656,10 @@ private struct SettingsTab: View {
     @ViewBuilder
     private var providersGroup: some View {
         let known = (store.report?.providers ?? []).filter(\.loggedIn)
-        let knownProviders = Set(known.map(\.name))
+        let knownIDs = Set(known.map(\.id))
+        let labelByID = Dictionary(uniqueKeysWithValues: known.map { ($0.id, $0.name) })
         let scopedModels = preferences.knownModelLimits.filter {
-            knownProviders.contains($0.provider)
+            knownIDs.contains($0.provider)
         }
 
         if !known.isEmpty {
@@ -664,9 +670,9 @@ private struct SettingsTab: View {
                     ForEach(known) { provider in
                         SettingRow(title: "Show \(provider.name)") {
                             GlassSwitch(isOn: Binding(
-                                get: { !preferences.hiddenProviders.contains(provider.name) },
+                                get: { !preferences.hiddenProviders.contains(provider.id) },
                                 set: { shown in
-                                    preferences.setProvider(provider.name, hidden: !shown)
+                                    preferences.setProvider(provider.id, hidden: !shown)
                                     store.iconPreferenceChanged()
                                 }
                             ))
@@ -675,7 +681,7 @@ private struct SettingsTab: View {
 
                     ForEach(scopedModels) { model in
                         SettingRow(
-                            title: "Show \(model.provider) \(model.displayName) limits",
+                            title: "Show \(labelByID[model.provider] ?? model.provider) \(model.displayName) limits",
                             subtitle: "the model-specific usage rows"
                         ) {
                             GlassSwitch(isOn: Binding(
@@ -1012,7 +1018,7 @@ private struct MinuteTimePicker: View {
 
 /// An inset group whose rows are separated by hairlines rather than spacing —
 /// the shape macOS System Settings uses for a run of related switches.
-private struct DividedRows<Content: View>: View {
+struct DividedRows<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {

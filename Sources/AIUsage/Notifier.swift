@@ -48,7 +48,7 @@ enum Notifier {
             for window in provider.windows {
                 // Keep providers' full structured model names in alert
                 // identity even when two compact labels happen to match.
-                let key = "\(provider.name)/\(window.id)"
+                let key = "\(provider.id)/\(window.id)"
                 var mark = marks[key] ?? Mark(resetsAt: window.resetsAt)
 
                 // A new reset instant means a new window: forget what we said.

@@ -16,6 +16,13 @@ enum RegressionTests {
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
+        testClaudeKeychainServiceDerivation()
+        testClaudePathNormalization()
+        testClaudeCatalogMerging()
+        testClaudeDefaultLabels()
+        testClaudeLegacyProviderDecoding()
+        testClaudeDuplicateTokenCollapse()
+        testClaudeConfigDirFromEnvironment()
         testCodexAdditionalLimitsAreParsedGenerically()
         testCodexMalformedAdditionalLimitsAreSkipped()
         testProviderSpecificModelDisplayNames()
@@ -874,7 +881,7 @@ enum RegressionTests {
         let claude = provider(name: "Claude", windows: [window(percent: 80, elapsedPercent: 50)])
         let report = Report(providers: [claude, codex], date: now)
 
-        let hidClaude = report.displayProviders(hiding: ["Claude"])
+        let hidClaude = report.displayProviders(hiding: [ClaudeProfile.defaultKeychainService])
         check(hidClaude.map(\.name) == ["Codex"], "a hidden provider must be dropped")
     }
 
@@ -890,7 +897,10 @@ enum RegressionTests {
             UsageWindow(label: "5h (Fable)", percent: 30, windowSeconds: 5 * 3600, model: "Fable")
         )
         let report = Report(providers: [claude], date: now)
-        let fable = ScopedModelLimit.key(provider: "Claude", model: "Fable")
+        let fable = ScopedModelLimit.key(
+            provider: ClaudeProfile.defaultKeychainService,
+            model: "Fable"
+        )
         let shown = report.displayProviders(hidingModels: [fable])
 
         check(
@@ -1533,6 +1543,124 @@ enum RegressionTests {
 
         check(schedule.nextBoundary(after: before, calendar: calendar) == end, "18:00 is the next boundary")
         check(!schedule.isActive(at: end, calendar: calendar), "the schedule must be inactive at its end")
+    }
+
+    private static func testClaudeKeychainServiceDerivation() {
+        check(
+            ClaudeProfile.keychainService(for: ClaudeProfile.defaultNormalizedPath)
+                == ClaudeProfile.defaultKeychainService,
+            "the default profile must keep the legacy Keychain service name"
+        )
+        let teamPath = "/Users/test/.claude-team"
+        check(
+            ClaudeProfile.keychainService(for: teamPath)
+                == "Claude Code-credentials-\(ClaudeProfile.pathHashPrefix8(teamPath))",
+            "non-default profiles must use the hashed service suffix"
+        )
+    }
+
+    private static func testClaudePathNormalization() {
+        check(
+            ClaudeProfile.normalizedPath("~/foo/./bar/../baz")
+                == (("~/foo/baz" as NSString).expandingTildeInPath),
+            "normalization must expand ~ and drop . and .. without resolving symlinks"
+        )
+        let mixedCase = "/Users/Test/.Claude-Team"
+        check(
+            ClaudeProfile.normalizedPath(mixedCase) == mixedCase,
+            "normalization must preserve path case"
+        )
+    }
+
+    private static func testClaudeCatalogMerging() {
+        let discovered = "/Users/test/.claude-work"
+        let ignored = ClaudeProfile.normalizedPath(discovered)
+        var catalog = ClaudeProfile.catalog(
+            configuredPaths: [discovered],
+            rememberedPaths: [],
+            discoveredPaths: [discovered],
+            ignoredPaths: [ignored]
+        )
+        check(
+            !catalog.contains(where: { $0.normalizedPath == ignored }),
+            "ignored paths must stay out until the user adds them again"
+        )
+        catalog = ClaudeProfile.catalog(
+            configuredPaths: [discovered],
+            rememberedPaths: [],
+            discoveredPaths: [],
+            ignoredPaths: []
+        )
+        check(catalog.count >= 2, "default and configured profiles must both appear")
+    }
+
+    private static func testClaudeDefaultLabels() {
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "max", customLabel: nil, profilePath: "/x")
+                == "Claude Personal",
+            "personal plans must default to Claude Personal"
+        )
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "team", customLabel: nil, profilePath: "/x")
+                == "Claude Team",
+            "team plans must default to Claude Team"
+        )
+        check(
+            ClaudeProfile.defaultLabel(subscriptionType: "team", customLabel: "Work", profilePath: "/x")
+                == "Work",
+            "a custom label must win over subscription defaults"
+        )
+    }
+
+    private static func testClaudeLegacyProviderDecoding() {
+        let json = """
+        {"name":"Claude","ok":true,"windows":[{"label":"5h","percent":40}]}
+        """
+        guard let provider = try? JSONDecoder().decode(Provider.self, from: Data(json.utf8)) else {
+            check(false, "legacy provider JSON must decode")
+            return
+        }
+        check(provider.id == ClaudeProfile.defaultKeychainService, "legacy Claude rows must map to the default profile id")
+        check(provider.kind == "claude", "legacy Claude rows must gain the claude kind")
+    }
+
+    private static func testClaudeDuplicateTokenCollapse() {
+        let personal = ClaudeProfile.Entry(
+            normalizedPath: ClaudeProfile.defaultNormalizedPath,
+            keychainService: ClaudeProfile.defaultKeychainService,
+            source: .default,
+            preferenceRank: 2
+        )
+        let teamPath = "/Users/test/.claude-team"
+        let team = ClaudeProfile.Entry(
+            normalizedPath: teamPath,
+            keychainService: ClaudeProfile.keychainService(for: teamPath),
+            source: .configured,
+            preferenceRank: 1
+        )
+        let token = "same-access-token"
+        let collapsed = ClaudeProfile.collapseDuplicateTokens([team, personal]) { _ in
+            ClaudeProfile.OAuthSnapshot(accessToken: token, subscriptionType: "team", expiresAtMs: nil)
+        }
+        check(collapsed.count == 1, "duplicate access tokens must collapse to one profile")
+        check(
+            collapsed[0].normalizedPath == personal.normalizedPath,
+            "the default profile must win an otherwise equal duplicate-token tie"
+        )
+    }
+
+    private static func testClaudeConfigDirFromEnvironment() {
+        let processList = """
+        123 /Users/me/.local/bin/claude chat
+        456 node /path/to/claude-code/cli.js
+        """
+        check(ClaudeCredential.claudePIDs(in: processList) == [123, 456], "Claude Code processes must be detected")
+        let environment = "PATH=/usr/bin CLAUDE_CONFIG_DIR=/Users/me/.claude-team OTHER=x"
+        check(
+            ClaudeCredential.configDir(inProcessEnvironment: environment)
+                == ClaudeProfile.normalizedPath("/Users/me/.claude-team"),
+            "CLAUDE_CONFIG_DIR must be parsed and normalized"
+        )
     }
 
     // ----------------------------------------------------------------- //

@@ -19,6 +19,9 @@ final class UsageStore: ObservableObject {
     /// Spells out both readings for whatever the item is drawn as, since the
     /// icon has room for one number and no room at all to label it.
     @Published private(set) var statusTooltip: String = "Tokens on Track — no reading yet"
+    /// Last process-discovery pass for Claude profiles. Settings reads this
+    /// instead of spawning `ps` on every row redraw.
+    @Published private(set) var discoveredClaudePaths: [String] = []
 
     nonisolated static var stateDirectory: URL {
         #if APP_STORE
@@ -69,6 +72,11 @@ final class UsageStore: ObservableObject {
     private var polledTokenExpiry: [String: Double?] = [:]
     private var refreshTimer: Timer?
     private var refreshAfterConnectionChange = false
+    /// At most one process scan per launch, plus whenever Settings changes.
+    private var remainingSessionClaudeScans = 1
+    /// Claude profiles resolved on the last full refresh. Scheduling reads this
+    /// so the minute wake never shells out to `security` on the main thread.
+    private var claudeTargets: [ClaudeProfile.Entry] = []
     private var scheduleBoundaryTimer: Timer?
     private var workSchedule = WorkSchedule.disabled
     private var preferenceWatches: Set<AnyCancellable> = []
@@ -155,6 +163,12 @@ final class UsageStore: ObservableObject {
         Task { await refresh() }
     }
 
+    private func pollingContext(discoveredPaths: [String]) -> ClaudePollingContext {
+        var context = Preferences.shared.claudePollingContext
+        context.discoveredPaths = discoveredPaths
+        return context
+    }
+
     // ----------------------------------------------------------------- //
 
     /// The window in the most trouble, which is what the menu bar leads with.
@@ -185,12 +199,13 @@ final class UsageStore: ObservableObject {
     /// Ask every provider now: the refresh button, wake, launch, and the
     /// normal interval.
     func refresh() async {
-        await refresh(names: Fetcher.providerNames, full: true)
+        await refresh(ids: nil, full: true)
     }
 
     /// A grant can change while the startup poll is still running. Queue one
     /// fresh poll so a just-connected provider need not wait for the timer.
     func connectionsChanged() {
+        remainingSessionClaudeScans = 1
         if isRefreshing {
             refreshAfterConnectionChange = true
         } else {
@@ -209,27 +224,28 @@ final class UsageStore: ObservableObject {
         // this before holding a rejected provider back below — it was still
         // attended to (by a local token check), so a stale token must not freeze
         // "updated …" while the others keep refreshing.
-        let full = due.count == Fetcher.providerNames.count
+        let all = Fetcher.pollTargetIDs(claudeTargets: claudeTargets)
+        let full = due.count == all.count
         // A provider whose token was rejected will 401 again until the CLI
         // writes a fresh one. Rather than re-poll blind, watch the token's local
         // expiry and ask again only when it moves — the sign a new token landed.
         // Until then the minute wake is a local read, not an API call.
-        let toPoll = due.filter { name in
-            guard staleToken(name),
-                  withinCarryWindow(name, now: now),
-                  Fetcher.localTokenExpiry(name) == polledTokenExpiry[name] ?? nil
+        let toPoll = due.filter { id in
+            guard staleToken(id),
+                  withinCarryWindow(id, now: now),
+                  Fetcher.localTokenExpiry(id) == polledTokenExpiry[id] ?? nil
             else { return true }
-            lastAttempt[name] = now  // attended: recheck in a minute, don't spin
+            lastAttempt[id] = now  // attended: recheck in a minute, don't spin
             return false
         }
         guard !toPoll.isEmpty else {
             scheduleTimer()
             return
         }
-        await refresh(names: toPoll, full: full)
+        await refresh(ids: toPoll, full: full)
     }
 
-    private func refresh(names: [String], full: Bool) async {
+    private func refresh(ids: [String]?, full: Bool) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer {
@@ -240,23 +256,52 @@ final class UsageStore: ObservableObject {
             }
         }
 
+        let preferences = Preferences.shared
+        let shouldScan = full && (
+            remainingSessionClaudeScans > 0
+                || !preferences.claudeConfiguredPaths.isEmpty
+        )
+        if shouldScan {
+            let paths = await Task.detached(priority: .utility) {
+                Fetcher.discoveredClaudeConfigDirs()
+            }.value
+            discoveredClaudePaths = paths
+            if remainingSessionClaudeScans > 0 {
+                remainingSessionClaudeScans -= 1
+            }
+        }
+
+        let context = pollingContext(discoveredPaths: discoveredClaudePaths)
+        if full || claudeTargets.isEmpty {
+            claudeTargets = Fetcher.claudePollTargets(context: context)
+        }
+        let allIDs = Fetcher.pollTargetIDs(claudeTargets: claudeTargets)
+        // Resolved here, on the main actor, so the fetch tasks never read Preferences.
+        var claudeLabels: [String: String] = [:]
+        for entry in claudeTargets {
+            claudeLabels[entry.id] = context.label(entry.normalizedPath)
+        }
+        let toFetch = ids ?? allIDs
+
         // Charge each poll from when it started, so a slow timeout cannot push
         // the next try out past its cadence.
         let started = Date()
-        for name in names { lastAttempt[name] = started }
+        for id in toFetch { lastAttempt[id] = started }
 
         let fetched = await Fetcher.fetch(
-            names: names,
-            openRouterMonthlyBudget: Preferences.shared.openRouterMonthlyBudget,
-            cursorMonthlyBudget: Preferences.shared.cursorMonthlyBudget
+            ids: toFetch,
+            claudeTargets: claudeTargets,
+            claudeLabels: claudeLabels,
+            openRouterMonthlyBudget: preferences.openRouterMonthlyBudget,
+            cursorMonthlyBudget: preferences.cursorMonthlyBudget
         )
-        let merged = merging(fetched, full: full, at: Date())
+        let merged = merging(fetched, full: full, at: Date(), allIDs: allIDs)
         Preferences.shared.rememberModelLimits(merged.scopedModelLimits)
         report = merged
         // Remember the expiry of any token just rejected, so the next wake can
         // tell a freshly-minted token apart from the same stale one.
         for provider in merged.providers where provider.staleToken {
-            polledTokenExpiry[provider.name] = Fetcher.localTokenExpiry(provider.name)
+            polledTokenExpiry[provider.id] = Fetcher.localTokenExpiry(provider.id)
         }
         write(merged)
         redrawIcon()
@@ -267,26 +312,36 @@ final class UsageStore: ObservableObject {
     /// Fold a poll into the reading we already have. A full poll stamps the
     /// report's clock; a partial one keeps it, since the providers it did not
     /// ask are still only as fresh as that clock says.
-    private func merging(_ fetched: [Provider], full: Bool, at now: Date) -> Report {
+    private func merging(
+        _ fetched: [Provider],
+        full: Bool,
+        at now: Date,
+        allIDs: [String]
+    ) -> Report {
         let previous = report
         var providers = previous?.providers ?? []
         for provider in fetched {
-            if let index = providers.firstIndex(where: { $0.name == provider.name }) {
+            if let index = providers.firstIndex(where: { $0.id == provider.id }) {
                 providers[index] = provider
             } else {
                 providers.append(provider)
             }
         }
-        for name in Fetcher.providerNames
-        where !providers.contains(where: { $0.name == name }) {
-            providers.append(Provider(name: name))
+        let targets = allIDs
+        let order = Dictionary(uniqueKeysWithValues: targets.enumerated().map { ($1, $0) })
+        let active = Set(targets)
+        providers.removeAll { $0.kind == "claude" && !active.contains($0.id) }
+        for id in targets
+        where !providers.contains(where: { $0.id == id }) {
+            if id == Fetcher.codexID {
+                providers.append(Provider(name: "Codex"))
+            } else if id == Fetcher.openRouterID {
+                providers.append(Provider(name: "OpenRouter"))
+            } else if id == Fetcher.cursorID {
+                providers.append(Provider(name: "Cursor"))
+            }
         }
-        // A task group hands results back in completion order, which would let
-        // the card's blocks shuffle between polls. Keep them in display order.
-        let order = Dictionary(
-            uniqueKeysWithValues: Fetcher.providerNames.enumerated().map { ($1, $0) }
-        )
-        providers.sort { (order[$0.name] ?? .max) < (order[$1.name] ?? .max) }
+        providers.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
 
         var merged = Report(providers: providers, date: now).carryingOver(from: previous, now: now)
         if !full, let previous {
@@ -339,14 +394,14 @@ final class UsageStore: ObservableObject {
     /// Each provider's own cadence: a minute while it is unreachable or waiting
     /// on a fresh token, the user's interval otherwise. The stale-token minute
     /// is spent reading the token locally, not the API — see `refreshDue`.
-    private func cadence(for name: String, configured: TimeInterval) -> TimeInterval {
-        let provider = report?.providers.first { $0.name == name }
+    private func cadence(for id: String, configured: TimeInterval) -> TimeInterval {
+        let provider = report?.providers.first { $0.id == id }
         let fast = provider?.unreachable == true || provider?.staleToken == true
         return fast ? min(configured, Self.offlineRetryInterval) : configured
     }
 
-    private func staleToken(_ name: String) -> Bool {
-        report?.providers.first { $0.name == name }?.staleToken ?? false
+    private func staleToken(_ id: String) -> Bool {
+        report?.providers.first { $0.id == id }?.staleToken ?? false
     }
 
     /// Whether a rejected provider's carried reading is still young enough to be
@@ -354,8 +409,8 @@ final class UsageStore: ObservableObject {
     /// must be dropped, and only re-polling gets it there — the carry runs when
     /// a poll lands as not-ok, which a held-back provider never does. Nil
     /// timestamp means nothing is being carried, so there is nothing to expire.
-    private func withinCarryWindow(_ name: String, now: Date) -> Bool {
-        guard let measured = report?.providers.first(where: { $0.name == name })?.measuredAt else {
+    private func withinCarryWindow(_ id: String, now: Date) -> Bool {
+        guard let measured = report?.providers.first(where: { $0.id == id })?.measuredAt else {
             return true
         }
         return now.timeIntervalSince1970 - Double(measured) < Report.carryLimit
@@ -363,18 +418,18 @@ final class UsageStore: ObservableObject {
 
     private func dueNames(at now: Date) -> [String] {
         let configured = max(60, Preferences.shared.refreshMinutes * 60)
-        return Fetcher.providerNames.filter { name in
-            let last = lastAttempt[name] ?? .distantPast
-            return now >= last.addingTimeInterval(cadence(for: name, configured: configured))
+        return Fetcher.pollTargetIDs(claudeTargets: claudeTargets).filter { id in
+            let last = lastAttempt[id] ?? .distantPast
+            return now >= last.addingTimeInterval(cadence(for: id, configured: configured))
         }
     }
 
     private func nextDelay(now: Date = Date()) -> TimeInterval {
         let configured = max(60, Preferences.shared.refreshMinutes * 60)
-        let soonest = Fetcher.providerNames.map { name -> TimeInterval in
-            let last = lastAttempt[name] ?? .distantPast
+        let soonest = Fetcher.pollTargetIDs(claudeTargets: claudeTargets).map { id -> TimeInterval in
+            let last = lastAttempt[id] ?? .distantPast
             return last
-                .addingTimeInterval(cadence(for: name, configured: configured))
+                .addingTimeInterval(cadence(for: id, configured: configured))
                 .timeIntervalSince(now)
         }.min() ?? configured
         return max(1, soonest)
@@ -400,7 +455,7 @@ final class UsageStore: ObservableObject {
         let shown = menuBarWindows(limit: preferences.menuBarSlots, timing: timing)
         let segments = shown.map {
             StatusIcon.Segment(
-                provider: $0.provider.name,
+                provider: $0.provider.kind,
                 window: $0.window.label,
                 percent: $0.window.percent,
                 text: Pace.reading(
@@ -419,9 +474,9 @@ final class UsageStore: ObservableObject {
                 source: "\($0.provider.name) \($0.window.label)",
                 window: $0.window,
                 explains: false,
-                showsCost: $0.provider.name == "Cursor"
+                showsCost: $0.provider.kind == "cursor"
                     ? preferences.showCursorCosts
-                    : preferences.showOpenRouterCosts,
+                    : $0.provider.kind == "openrouter" && preferences.showOpenRouterCosts,
                 timing: timing
             )
         }

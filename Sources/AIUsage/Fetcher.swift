@@ -19,25 +19,43 @@ enum Fetcher {
 
     static let timeout: TimeInterval = 20
 
-    /// The providers this app knows how to poll, in display order. Named so the
-    /// store can schedule each one on its own cadence.
-    static let providerNames = ["Claude", "Codex", "OpenRouter", "Cursor"]
+    static let codexID = "Codex"
+    static let openRouterID = "OpenRouter"
+    static let cursorID = "Cursor"
 
-    /// Fetch every named provider, concurrently. A provider left out is one the
-    /// caller has decided is not due yet.
+    /// Poll targets in display order: each Claude profile, then the other providers.
+    static func pollTargetIDs(claudeTargets: [ClaudeProfile.Entry]) -> [String] {
+        claudeTargets.map(\.id) + [codexID, openRouterID, cursorID]
+    }
+
+    /// Fetch every target id, concurrently. A target left out is one the caller
+    /// has decided is not due yet.
     static func fetch(
-        names: [String],
+        ids: [String],
+        claudeTargets: [ClaudeProfile.Entry],
+        claudeLabels: [String: String] = [:],
         openRouterMonthlyBudget: Double?,
         cursorMonthlyBudget: Double?
     ) async -> [Provider] {
-        await withTaskGroup(of: Provider.self) { group in
-            for name in names {
+        let claudeByID = Dictionary(uniqueKeysWithValues: claudeTargets.map { ($0.id, $0) })
+        return await withTaskGroup(of: Provider.self) { group in
+            for id in ids {
                 group.addTask {
-                    await fetch(
-                        name,
-                        openRouterMonthlyBudget: openRouterMonthlyBudget,
-                        cursorMonthlyBudget: cursorMonthlyBudget
-                    )
+                    if let entry = claudeByID[id] {
+                        return await fetchClaude(
+                            entry: entry,
+                            customLabel: claudeLabels[entry.id]
+                        )
+                    }
+                    switch id {
+                    case codexID: return await fetchCodex()
+                    case openRouterID:
+                        return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
+                    case cursorID:
+                        return await fetchCursor(monthlyBudget: cursorMonthlyBudget)
+                    default:
+                        return Provider(id: id, kind: id.lowercased(), name: id)
+                    }
                 }
             }
             var providers: [Provider] = []
@@ -46,48 +64,85 @@ enum Fetcher {
         }
     }
 
-    static func fetch(
-        _ name: String,
-        openRouterMonthlyBudget: Double?,
-        cursorMonthlyBudget: Double?
-    ) async -> Provider {
-        switch name {
-        case "Claude": return await fetchClaude()
-        case "Codex": return await fetchCodex()
-        case "OpenRouter": return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
-        case "Cursor": return await fetchCursor(monthlyBudget: cursorMonthlyBudget)
-        default: return Provider(name: name)
+    static func claudePollTargets(context: ClaudePollingContext = .init()) -> [ClaudeProfile.Entry] {
+        let catalog = ClaudeProfile.catalog(
+            configuredPaths: context.configuredPaths,
+            rememberedPaths: context.rememberedPaths,
+            discoveredPaths: context.discoveredPaths,
+            ignoredPaths: context.ignoredPaths
+        )
+        var oauthCache: [String: ClaudeProfile.OAuthSnapshot?] = [:]
+        func oauth(_ entry: ClaudeProfile.Entry) -> ClaudeProfile.OAuthSnapshot? {
+            if let hit = oauthCache[entry.keychainService] { return hit }
+            let snapshot = keychainSecret(service: entry.keychainService)
+                .flatMap(ClaudeProfile.parseOAuth)
+            oauthCache[entry.keychainService] = snapshot
+            return snapshot
         }
+        let loggedIn = catalog.filter { oauth($0) != nil }
+        for entry in loggedIn {
+            context.remember(entry.normalizedPath)
+        }
+        var pollable = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
+            if let hit = oauthCache[service] { return hit }
+            let snapshot = keychainSecret(service: service).flatMap(ClaudeProfile.parseOAuth)
+            oauthCache[service] = snapshot
+            return snapshot
+        })
+        let seen = Set(pollable.map(\.normalizedPath))
+        for entry in catalog {
+            let path = entry.normalizedPath
+            if path == ClaudeProfile.defaultNormalizedPath, !seen.contains(path) {
+                pollable.insert(entry, at: 0)
+            } else if context.configuredPaths.contains(path), !seen.contains(path) {
+                pollable.append(entry)
+            }
+        }
+        return pollable
     }
 
     // ----------------------------------------------------------------- //
     // Claude Code
     // ----------------------------------------------------------------- //
 
-    static func fetchClaude() async -> Provider {
-        var provider = Provider(name: "Claude")
+    static func fetchClaude(entry: ClaudeProfile.Entry, customLabel: String?) async -> Provider {
+        let label = ClaudeProfile.defaultLabel(
+            subscriptionType: nil,
+            customLabel: customLabel,
+            profilePath: entry.normalizedPath
+        )
+        var provider = Provider(
+            id: entry.keychainService,
+            kind: "claude",
+            name: label,
+            profilePath: entry.normalizedPath
+        )
 
-        guard let blob = keychainSecret(service: keychainService) else {
+        guard let blob = keychainSecret(service: entry.keychainService) else {
             provider.error = "keychain unavailable"
             return provider
         }
-        let oauth = (json(blob)?["claudeAiOauth"] as? [String: Any]) ?? [:]
-        guard let token = oauth["accessToken"] as? String, !token.isEmpty else {
+        guard let oauth = ClaudeProfile.parseOAuth(from: blob) else {
             provider.error = "not logged in"
             return provider
         }
         provider.loggedIn = true
-        provider.plan = oauth["subscriptionType"] as? String
+        provider.plan = oauth.subscriptionType
+        provider.name = ClaudeProfile.defaultLabel(
+            subscriptionType: oauth.subscriptionType,
+            customLabel: customLabel,
+            profilePath: entry.normalizedPath
+        )
 
         let data: [String: Any]
         do {
             data = try await getJSONRetrying(claudeUsageURL, headers: [
-                "Authorization": "Bearer \(token)",
+                "Authorization": "Bearer \(oauth.accessToken)",
                 "anthropic-beta": "oauth-2025-04-20",
                 "Accept": "application/json",
             ])
         } catch let error as HTTPStatus {
-            provider.error = note(for: error.code, refreshWith: "claude")
+            provider.error = claudeNote(for: error.code, profilePath: entry.normalizedPath)
             provider.staleToken = error.code == 401
             return provider
         } catch {
@@ -101,6 +156,46 @@ enum Fetcher {
         if !provider.ok { provider.error = "no limit data" }
         return provider
     }
+
+    static func claudeNote(for code: Int, profilePath: String) -> String {
+        switch code {
+        case 401:
+            if profilePath == ClaudeProfile.defaultNormalizedPath {
+                return note(for: code, refreshWith: "claude")
+            }
+            return "stored token went stale — run Claude Code with CLAUDE_CONFIG_DIR=\(profilePath)"
+        default:
+            return note(for: code, refreshWith: "claude")
+        }
+    }
+
+    #if !APP_STORE
+    static func discoveredClaudeConfigDirs() -> [String] {
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
+            timeout: 2
+        ), let list = String(data: raw, encoding: .utf8)
+        else { return [] }
+
+        var seen = Set<String>()
+        var paths: [String] = []
+        for pid in ClaudeCredential.claudePIDs(in: list).prefix(8) {
+            guard let raw = runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["eww", "-p", String(pid), "-o", "command="],
+                timeout: 2
+            ), let environment = String(data: raw, encoding: .utf8),
+                  let path = ClaudeCredential.configDir(inProcessEnvironment: environment),
+                  seen.insert(path).inserted
+            else { continue }
+            paths.append(path)
+        }
+        return paths
+    }
+    #else
+    static func discoveredClaudeConfigDirs() -> [String] { [] }
+    #endif
 
     /// Turn Claude's current structured `limits` list into ordinary windows.
     /// Model names and future groups come from the response rather than a list
@@ -685,21 +780,23 @@ enum Fetcher {
     /// The store uses this, not the API, to decide when a token-rejected
     /// provider is worth polling again: a 401 lasts until the CLI writes a new
     /// token, and the only local sign that has happened is the expiry moving.
-    static func localTokenExpiry(_ name: String) -> Double? {
-        switch name {
-        case "Claude":
-            guard let blob = keychainSecret(service: keychainService),
-                  let oauth = json(blob)?["claudeAiOauth"] as? [String: Any],
-                  let ms = (oauth["expiresAt"] as? NSNumber)?.doubleValue
+    static func localTokenExpiry(_ providerID: String) -> Double? {
+        if providerID == ClaudeProfile.defaultKeychainService
+            || providerID.hasPrefix(ClaudeProfile.keychainPrefix) {
+            guard let blob = keychainSecret(service: providerID),
+                  let oauth = ClaudeProfile.parseOAuth(from: blob),
+                  let ms = oauth.expiresAtMs
             else { return nil }
             return ms / 1000  // stored in milliseconds
-        case "Codex":
+        }
+        switch providerID {
+        case codexID:
             guard let raw = codexAuthData(),
                   let tokens = json(raw)?["tokens"] as? [String: Any],
                   let token = tokens["access_token"] as? String
             else { return nil }
             return jwtExpiry(token)
-        case "Cursor":
+        case cursorID:
             if let saved = CursorKeychain.read(), let jwt = CursorCredential.session(from: saved)?.jwt {
                 return jwtExpiry(jwt)
             }

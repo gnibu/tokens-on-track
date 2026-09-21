@@ -128,7 +128,7 @@ enum OpenRouterCredential {
         .expandingTildeInPath
 
     static func reconnectMessage(for provider: Provider) -> String? {
-        guard provider.name == "OpenRouter",
+        guard provider.kind == "openrouter",
               provider.error == OpenRouterBudget.notConnectedMessage,
               provider.credentialSource == .conductor
         else { return nil }
