@@ -78,6 +78,7 @@ private struct ClaudeAccountRow: View {
             AccountNicknameField(
                 text: $labelText,
                 plan: liveProvider?.plan,
+                hasChanges: labelText != committedLabelText,
                 onCommit: commitLabel
             )
             .onAppear { syncLabel() }

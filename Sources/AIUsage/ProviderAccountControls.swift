@@ -4,6 +4,7 @@ import SwiftUI
 struct AccountNicknameField: View {
     @Binding var text: String
     let plan: String?
+    let hasChanges: Bool
     let onCommit: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -38,6 +39,15 @@ struct AccountNicknameField: View {
                     Text(plan.uppercased())
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Glass.ink(0.5))
+                }
+
+                GlassButton(
+                    label: "Save",
+                    prominent: true,
+                    enabled: hasChanges
+                ) {
+                    onCommit()
+                    isFocused = false
                 }
             }
         }
