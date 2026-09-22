@@ -490,13 +490,17 @@ enum Fetcher {
     }
 
     static func fetchOpenCodeGo() async -> Provider {
-        var provider = openCodeGoProvider()
         let candidates = openCodeGoCandidates()
+        let hasManualKey = candidates.contains(where: \.authoritative)
+        var provider = openCodeGoProvider()
+        provider.loggedIn = OpenCodeGoUsage.shouldShowProvider(
+            hasManualKey: hasManualKey,
+            hasUsage: false
+        )
         guard !candidates.isEmpty else {
             provider.error = OpenCodeGoUsage.notConnectedMessage
             return provider
         }
-        provider.loggedIn = true
 
         var response: [String: Any]?
         for candidate in candidates {
@@ -526,6 +530,10 @@ enum Fetcher {
             return provider
         }
         provider.windows = OpenCodeGoUsage.windows(from: response)
+        provider.loggedIn = OpenCodeGoUsage.shouldShowProvider(
+            hasManualKey: hasManualKey,
+            hasUsage: !provider.windows.isEmpty
+        )
         guard !provider.windows.isEmpty else {
             provider.error = "no limit data"
             return provider

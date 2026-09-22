@@ -5,6 +5,14 @@ import Foundation
 enum OpenCodeGoUsage {
     static let notConnectedMessage = "not connected"
 
+    /// Auto-discovered OpenCode credentials do not prove that the account has
+    /// a Go subscription. Only actual Go usage makes those accounts visible;
+    /// a key deliberately saved in Settings remains visible so its errors can
+    /// be corrected there.
+    static func shouldShowProvider(hasManualKey: Bool, hasUsage: Bool) -> Bool {
+        hasManualKey || hasUsage
+    }
+
     static func windows(from data: [String: Any]) -> [UsageWindow] {
         guard let usage = data["usage"] as? [String: Any] else { return [] }
         let descriptors: [(key: String, label: String, seconds: Int?)] = [

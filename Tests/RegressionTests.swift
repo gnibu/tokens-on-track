@@ -44,6 +44,7 @@ enum RegressionTests {
         testOpenRouterDollarFormatting()
         testOpenCodeGoUsageWindowsAreParsed()
         testOpenCodeGoMalformedWindowsAreSkipped()
+        testOpenCodeGoVisibilityRequiresGoOrManualKey()
         testOpenCodeGoProviderPresentation()
         testOpenCodeGoLegacyCredentialIsParsed()
         testOpenCodeGoAccountCredentialIsParsed()
@@ -560,6 +561,21 @@ enum RegressionTests {
         ]
         let windows = OpenCodeGoUsage.windows(from: fixture)
         check(windows.map(\.label) == ["week"], "malformed OpenCode Go windows must not become healthy zeroes")
+    }
+
+    private static func testOpenCodeGoVisibilityRequiresGoOrManualKey() {
+        check(
+            !OpenCodeGoUsage.shouldShowProvider(hasManualKey: false, hasUsage: false),
+            "a general auto-discovered OpenCode key must not expose a broken Go card"
+        )
+        check(
+            OpenCodeGoUsage.shouldShowProvider(hasManualKey: true, hasUsage: false),
+            "a key saved in Settings must keep Go errors visible and actionable"
+        )
+        check(
+            OpenCodeGoUsage.shouldShowProvider(hasManualKey: false, hasUsage: true),
+            "valid Go quota data must expose the provider for auto-discovered keys"
+        )
     }
 
     private static func testOpenCodeGoProviderPresentation() {
