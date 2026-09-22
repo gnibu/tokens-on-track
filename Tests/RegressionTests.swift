@@ -70,6 +70,7 @@ enum RegressionTests {
         testHiddenProviderIsFiltered()
         testHiddenScopedModelLimitsAreFiltered()
         testRecentlyActiveProviderStaysVisibleWhenUnreadable()
+        testRemovedKeychainProviderIsForgotten()
         testFailedPollKeepsTheLastReading()
         testCarriedReadingIsDroppedOnceItIsOld()
         testCarriedWindowIsDroppedOnceItHasReset()
@@ -1229,6 +1230,26 @@ enum RegressionTests {
         check(
             carried.providers[0].credentialSource == .conductor,
             "the carried reading must remember the Conductor source"
+        )
+    }
+
+    private static func testRemovedKeychainProviderIsForgotten() {
+        var good = Fetcher.openCodeGoProvider()
+        good.ok = true
+        good.loggedIn = true
+        good.credentialSource = .keychain
+        good.windows = [window(percent: 20, elapsedPercent: 50)]
+        let previous = Report(providers: [good], date: now)
+
+        var disconnected = Fetcher.openCodeGoProvider()
+        disconnected.error = OpenCodeGoUsage.notConnectedMessage
+        let later = now.addingTimeInterval(300)
+        let refreshed = Report(providers: [disconnected], date: later)
+            .carryingOver(from: previous, now: later)
+
+        check(
+            refreshed.visibleProviders.isEmpty,
+            "removing a saved Keychain credential must hide its old reading immediately"
         )
     }
 

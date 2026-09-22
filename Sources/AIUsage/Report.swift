@@ -336,6 +336,16 @@ struct Report: Codable, Equatable {
                   old.ok
             else { return provider }
 
+            // A saved Keychain key disappearing is an explicit disconnect, not
+            // a transient failed poll. Forget its last reading immediately so
+            // removing a provider does not leave a stale "not connected"
+            // warning behind for the normal carry window.
+            if provider.error == OpenCodeGoUsage.notConnectedMessage,
+               provider.credentialSource == nil,
+               old.credentialSource == .keychain {
+                return provider
+            }
+
             let measured = (old.stale ? old.measuredAt : previous.updatedAt) ?? previous.updatedAt
             guard now.timeIntervalSince1970 - Double(measured) < Self.carryLimit else { return provider }
 
