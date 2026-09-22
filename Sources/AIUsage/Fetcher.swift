@@ -1,16 +1,14 @@
 import Darwin
 import Foundation
 
-/// Reads credentials already stored on the machine by the provider CLIs:
-///   - Claude Code: macOS Keychain item "Claude Code-credentials"
-///   - Codex:       ~/.codex/auth.json
-///
-/// Nothing is written back to those stores and no token is ever logged. This is
-/// the same requests the two CLIs make for themselves.
+/// Reads provider credentials already stored on this Mac, plus keys the user
+/// explicitly saved in the app's Keychain items. Nothing is written back to a
+/// provider-owned store and no token is ever logged.
 enum Fetcher {
     static let keychainService = "Claude Code-credentials"
     static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
+    static let openCodeGoUsageURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
     static let openRouterUsageURL = URL(string: "https://openrouter.ai/api/v1/key")!
     static let cursorUsageSummaryURL = URL(string: "https://cursor.com/api/usage-summary")!
     static let cursorTeamSpendURL = URL(string: "https://api.cursor.com/teams/spend")!
@@ -19,6 +17,7 @@ enum Fetcher {
     static let timeout: TimeInterval = 20
 
     static let codexID = CodexProfile.defaultID
+    static let openCodeGoID = "OpenCode Go"
     static let openRouterID = "OpenRouter"
     static let cursorID = "Cursor"
 
@@ -28,7 +27,7 @@ enum Fetcher {
         claudeTargets: [ClaudeProfile.Entry],
         codexTargets: [CodexProfile.Entry]
     ) -> [String] {
-        claudeTargets.map(\.id) + codexTargets.map(\.id) + [openRouterID, cursorID]
+        claudeTargets.map(\.id) + codexTargets.map(\.id) + [openCodeGoID, openRouterID, cursorID]
     }
 
     /// Fetch every target id, concurrently. A target left out is one the caller
@@ -60,6 +59,8 @@ enum Fetcher {
                         )
                     }
                     switch id {
+                    case openCodeGoID:
+                        return await fetchOpenCodeGo()
                     case openRouterID:
                         return await fetchOpenRouter(monthlyBudget: openRouterMonthlyBudget)
                     case cursorID:
@@ -472,6 +473,124 @@ enum Fetcher {
             ))
         }
         return out.sorted { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? 0) }
+    }
+
+    // ----------------------------------------------------------------- //
+    // OpenCode Go
+    // ----------------------------------------------------------------- //
+
+    static func openCodeGoProvider() -> Provider {
+        var provider = Provider(
+            id: openCodeGoID,
+            kind: "opencode-go",
+            name: "OpenCode"
+        )
+        provider.plan = "GO"
+        return provider
+    }
+
+    static func fetchOpenCodeGo() async -> Provider {
+        var provider = openCodeGoProvider()
+        let candidates = openCodeGoCandidates()
+        guard !candidates.isEmpty else {
+            provider.error = OpenCodeGoUsage.notConnectedMessage
+            return provider
+        }
+        provider.loggedIn = true
+
+        var response: [String: Any]?
+        for candidate in candidates {
+            provider.credentialSource = candidate.source
+            do {
+                response = try await getJSONRetrying(openCodeGoUsageURL, headers: [
+                    "Authorization": "Bearer \(candidate.key)",
+                    "Accept": "application/json",
+                    "User-Agent": "Tokens-on-Track",
+                ])
+                break
+            } catch let error as HTTPStatus
+                where (error.code == 401 || error.code == 403) && !candidate.authoritative {
+                continue
+            } catch let error as HTTPStatus {
+                provider.error = openCodeGoNote(for: error.code, manual: candidate.authoritative)
+                return provider
+            } catch {
+                provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+                provider.unreachable = true
+                return provider
+            }
+        }
+
+        guard let response else {
+            provider.error = "stored key was rejected"
+            return provider
+        }
+        provider.windows = OpenCodeGoUsage.windows(from: response)
+        guard !provider.windows.isEmpty else {
+            provider.error = "no limit data"
+            return provider
+        }
+        provider.ok = true
+        return provider
+    }
+
+    private static func openCodeGoCandidates() -> [OpenCodeGoCredential.Candidate] {
+        var candidates: [OpenCodeGoCredential.Candidate] = []
+        if let key = OpenCodeGoKeychain.read() {
+            candidates.append(.init(key: key, source: .keychain, authoritative: true))
+        }
+        #if !APP_STORE
+        if let raw = FileManager.default.contents(atPath: OpenCodeGoCredential.accountPath),
+           let key = OpenCodeGoCredential.key(inAccountStore: raw) {
+            candidates.append(.init(key: key, source: .openCode, authoritative: false))
+        }
+        if let raw = FileManager.default.contents(atPath: OpenCodeGoCredential.legacyAuthPath),
+           let key = OpenCodeGoCredential.key(inLegacyAuth: raw) {
+            candidates.append(.init(key: key, source: .openCode, authoritative: false))
+        }
+        let environment = ProcessInfo.processInfo.environment
+        for name in ["OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"] {
+            if let key = environment[name], !key.isEmpty {
+                candidates.append(.init(key: key, source: .environment, authoritative: false))
+            }
+        }
+        candidates += conductorOpenCodeGoKeys().map {
+            .init(key: $0, source: .conductor, authoritative: false)
+        }
+        #endif
+
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0.key).inserted }
+    }
+
+    #if !APP_STORE
+    private static func conductorOpenCodeGoKeys() -> [String] {
+        guard let raw = runProcess(
+            executableURL: URL(fileURLWithPath: "/bin/ps"),
+            arguments: ["-axo", "pid=,command="],
+            timeout: 5
+        ), let list = String(data: raw, encoding: .utf8)
+        else { return [] }
+
+        return OpenRouterCredential.conductorPIDs(in: list).compactMap { pid in
+            guard let raw = runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/ps"),
+                arguments: ["eww", "-p", String(pid), "-o", "command="],
+                timeout: 5
+            ), let environment = String(data: raw, encoding: .utf8)
+            else { return nil }
+            return OpenCodeGoCredential.key(inProcessEnvironment: environment)
+        }
+    }
+    #endif
+
+    private static func openCodeGoNote(for code: Int, manual: Bool) -> String {
+        switch code {
+        case 401, 403: return manual ? "key rejected — update it in Settings" : "stored key was rejected"
+        case 429: return "rate limited — the reading will catch up"
+        case 500...599: return "the service is not answering (http \(code))"
+        default: return "http \(code)"
+        }
     }
 
     // ----------------------------------------------------------------- //

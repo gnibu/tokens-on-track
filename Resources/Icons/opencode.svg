@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenCode's official favicon mark, enlarged with a transparent centre. -->
+<svg role="img" viewBox="96 96 320 320" xmlns="http://www.w3.org/2000/svg">
+  <title>OpenCode</title>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z"/>
+</svg>

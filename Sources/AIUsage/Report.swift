@@ -224,6 +224,7 @@ struct Provider: Codable, Identifiable, Equatable {
         case "Claude":
             return (ClaudeProfile.defaultKeychainService, "claude")
         case "Codex": return ("Codex", "codex")
+        case "OpenCode Go": return ("OpenCode Go", "opencode-go")
         case "OpenRouter": return ("OpenRouter", "openrouter")
         case "Cursor": return ("Cursor", "cursor")
         default: return (name, name.lowercased())

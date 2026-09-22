@@ -48,6 +48,7 @@ enum BrandGlyph {
     private static let files = [
         "claude": "claude.svg",
         "codex": "openai.svg",
+        "opencode-go": "opencode.svg",
         "openrouter": "openrouter.svg",
         "cursor": "cursor.svg",
     ]

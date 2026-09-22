@@ -2,9 +2,9 @@
 
 **Use every token. Never run dry.**
 
-Tokens on Track is a macOS menu bar app showing how much of your **Claude Code**
-and **Codex** quota you have burned, plus **OpenRouter** and **Cursor** spend
-against the budgets those services expose. It shows whether you are spending
+Tokens on Track is a macOS menu bar app showing how much of your **Claude Code**,
+**Codex**, and **OpenCode Go** quota you have burned, plus **OpenRouter** and
+**Cursor** spend against the budgets those services expose. It shows whether you are spending
 faster than the window refills, refreshes every 10 minutes by default, and tells
 you when you are running hot.
 
@@ -26,6 +26,10 @@ week        ▓▓▓▓┃──────   22%  Sat 21:00
 Codex                              PRO
 week        ▓───┃──────    3%  Mon 08:34
 week (Spark)▓───┃──────    1%  Mon 08:36
+OpenCode                            GO
+5h          ▓▓──┃──────   14%     15:30
+week        ▓───┃──────    8%  Mon 02:00
+month       ▓───┃──────    4%  Wed 12:44
 OpenRouter                       $20/MO
 day         ▓▓──┃──────   16%     00:00
 month       ▓───┃──────    1%  Wed 00:00
@@ -102,7 +106,8 @@ again.
 
 The Settings tab groups them the way System Settings does: *Menu bar* (which
 parts to draw, how many windows), *Display* (whether percentages show *Used* or
-*Vs target*, desktop card on/off, its layer, open at login), *OpenRouter*
+*Vs target*, desktop card on/off, its layer, open at login), *OpenCode Go*
+(connection and optional API key), *OpenRouter*
 (connection, optional API key, one monthly USD budget, and optional dollar
 details), *Cursor* (connection, optional API key or session token, an optional
 monthly budget for team Admin keys, and optional dollar details), *Working hours*
@@ -146,6 +151,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 | Source file | Job |
 | --- | --- |
 | `Fetcher.swift` | discovers credentials and calls the usage APIs |
+| `OpenCodeGo.swift` | maps OpenCode Go's reported quota percentages into windows |
 | `OpenRouter.swift` | derives daily and monthly budget windows from spend |
 | `Cursor.swift` | maps Cursor's billing cycle and team spend into the same windows |
 | `Report.swift` | the JSON written to the cache |
@@ -164,6 +170,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 | --- | --- | --- |
 | Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+) | `GET api.anthropic.com/api/oauth/usage` |
 | Codex | One `auth.json` per Codex profile (`~/.codex`, or another `CODEX_HOME` folder) | `GET chatgpt.com/backend-api/codex/usage` |
+| OpenCode Go | app Keychain item, active OpenCode account, `OPENCODE_GO_API_KEY` / `OPENCODE_API_KEY`, or a running Conductor OpenCode process | `GET opencode.ai/zen/go/v1/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
 | Cursor | signed-in Cursor app session, app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, or a running Conductor Cursor process | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
 
@@ -186,6 +193,10 @@ Which windows appear depends on what each API returns for your plan:
   On Pro today only weekly windows come back —
   `secondary_window` is `null`. If a 5-hour window reappears it is rendered with
   no change.
+- OpenCode Go reports its 5-hour, weekly, and monthly quota percentages and
+  reset times directly. Tokens on Track reads the active `opencode-go` account
+  from OpenCode's current `account.json`, with its legacy `auth.json` entry as a
+  fallback. No local budget is required.
 - OpenRouter reports dollar spend. Enter one monthly budget in Settings; the
   app divides it by the number of UTC days in the current month for the daily
   row, while the monthly row uses the full amount. A disabled-by-default setting
@@ -217,11 +228,12 @@ Worth understanding before running something that touches your API credentials.
   only reads folders you explicitly choose. Tokens remain in each profile's
   `auth.json`.
 - Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
-  each selected profile's `auth.json`, a Cursor session from the Cursor app's Keychain item
+  each selected profile's `auth.json`, an OpenCode Go key from OpenCode's active
+  account, a Cursor session from the Cursor app's Keychain item
   `cursor-access-token` or `state.vscdb`, and an OpenRouter or Cursor key from
   the first available configured source. A key entered in Settings is stored in
   the app's own Keychain item.
-- Conductor's OpenRouter or Cursor key is available only inside its managed
+- Conductor's OpenCode Go, OpenRouter, or Cursor key is available only inside its managed
   process. While that process is running, the app can read its same-user process
   environment as a best-effort fallback; it never copies that key into storage.
 - Sends each token *only* to its own provider's host. No third party, no
@@ -338,7 +350,8 @@ Copyright © 2026 Benoit Pothier. Released under the MIT License — see
 
 `Resources/Icons` holds the Claude and OpenAI marks, taken verbatim from
 [simple-icons](https://github.com/simple-icons/simple-icons), whose packaging is
-CC0. The marks themselves remain trademarks of Anthropic and OpenAI, and are
+CC0, plus provider marks from their official sites. The marks themselves remain
+trademarks of their respective owners, and are
 used here only to identify whose quota a row is reporting. They are drawn
 monochrome and scaled uniformly, never recoloured, stretched or rotated. Neither
-company endorses or is affiliated with this project.
+the providers nor their owners endorse or are affiliated with this project.

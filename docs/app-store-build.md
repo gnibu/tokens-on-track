@@ -60,6 +60,8 @@ Open the menu bar dropdown → **Settings → Connections**:
   containing `state.vscdb`.
 - **Claude:** uses the existing Claude Code Keychain login. macOS may request
   consent; run Claude Code if the provider token expires.
+- **OpenCode Go:** add the API key from your OpenCode account in its Settings
+  section.
 - **OpenRouter:** add your key in its Settings section. Cursor also supports
   a manually entered team Admin key.
 
@@ -71,7 +73,7 @@ folder or a failed bookmark save also keeps the previous grant. Use **Remove**
 to forget access, or **Choose again** when permissions expire or are revoked.
 
 The Store build does not inspect other processes, read their environments, or
-automatically search OpenCode files. It never changes Claude, Codex, or Cursor
+automatically search OpenCode files. It never changes Claude, Codex, OpenCode, or Cursor
 credentials. Only manually entered keys are written to the app's own Keychain
 items. Cached readings may remain visible as stale after removing a grant.
 

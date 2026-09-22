@@ -91,6 +91,9 @@ private struct SettingsTab: View {
     @EnvironmentObject private var store: UsageStore
     @ObservedObject private var preferences = Preferences.shared
     @State private var opensAtLogin = Preferences.shared.opensAtLogin
+    @State private var editingOpenCodeGoKey = false
+    @State private var openCodeGoKey = ""
+    @State private var openCodeGoKeyError: String?
     @State private var editingOpenRouterKey = false
     @State private var openRouterKey = ""
     @State private var openRouterKeyError: String?
@@ -119,6 +122,7 @@ private struct SettingsTab: View {
                     displayGroup
                     claudeAccountsGroup
                     codexAccountsGroup
+                    openCodeGoGroup
                     openRouterGroup
                     cursorGroup
                     providersGroup
@@ -164,6 +168,10 @@ private struct SettingsTab: View {
                 ProviderConnectionInfo(
                     name: "Claude",
                     detail: "Uses your Claude Code login in Keychain. Open Claude Code once if its login expires."
+                )
+                ProviderConnectionInfo(
+                    name: "OpenCode Go",
+                    detail: "Add an API key below. Keys are saved in this Mac’s Keychain."
                 )
                 ProviderConnectionInfo(
                     name: "OpenRouter",
@@ -387,6 +395,133 @@ private struct SettingsTab: View {
                             store.iconPreferenceChanged()
                         }
                 }
+            }
+        }
+    }
+
+    private var openCodeGoGroup: some View {
+        Group {
+            groupTitle("OpenCode Go")
+
+            DividedRows {
+                SettingRow(
+                    title: "Connection",
+                    subtitle: openCodeGoConnectionSubtitle
+                ) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(openCodeGoConnectionColor)
+                            .frame(width: 6, height: 6)
+                        Text(openCodeGoConnectionLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Glass.ink(0.72))
+                    }
+                }
+
+                SettingRow(
+                    title: "API key",
+                    subtitle: openCodeGoKeyError ?? (store.hasSavedOpenCodeGoKey
+                        ? "saved in this Mac's Keychain"
+                        : "add a key for reliable tracking")
+                ) {
+                    if editingOpenCodeGoKey {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            SecureField("sk-opencode-…", text: $openCodeGoKey)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11).monospaced())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .frame(width: 150)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(Color.black.opacity(0.25))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.14))
+                                )
+
+                            HStack(spacing: 10) {
+                                GlassLink(title: "Cancel") {
+                                    editingOpenCodeGoKey = false
+                                    openCodeGoKey = ""
+                                    openCodeGoKeyError = nil
+                                }
+                                GlassButton(
+                                    label: "Save",
+                                    enabled: !openCodeGoKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ) {
+                                    saveOpenCodeGoKey()
+                                }
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            if store.hasSavedOpenCodeGoKey {
+                                GlassLink(title: "Remove") {
+                                    Task {
+                                        if await store.removeOpenCodeGoKey() {
+                                            openCodeGoKeyError = nil
+                                        } else {
+                                            openCodeGoKeyError = "Could not remove the key from Keychain"
+                                        }
+                                    }
+                                }
+                            }
+                            GlassButton(label: store.hasSavedOpenCodeGoKey ? "Replace…" : "Add key…") {
+                                editingOpenCodeGoKey = true
+                                openCodeGoKeyError = nil
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var openCodeGoProvider: Provider? {
+        store.report?.providers.first(where: { $0.id == Fetcher.openCodeGoID })
+    }
+
+    private var isOpenCodeGoConnected: Bool {
+        guard let provider = openCodeGoProvider, provider.credentialSource != nil else {
+            return false
+        }
+        return provider.error != OpenCodeGoUsage.notConnectedMessage
+    }
+
+    private var openCodeGoConnectionLabel: String {
+        guard isOpenCodeGoConnected else { return "Not connected" }
+        if openCodeGoProvider?.error?.contains("rejected") == true { return "Rejected" }
+        return "Connected"
+    }
+
+    private var openCodeGoConnectionSubtitle: String {
+        guard let provider = openCodeGoProvider else {
+            return "Uses your OpenCode login, or add a key below"
+        }
+        var parts: [String] = []
+        if let source = provider.credentialSource { parts.append(source.rawValue) }
+        if let error = provider.error { parts.append(error) }
+        return parts.isEmpty
+            ? "Uses your OpenCode login, or add a key below"
+            : parts.joined(separator: " · ")
+    }
+
+    private var openCodeGoConnectionColor: Color {
+        guard isOpenCodeGoConnected else { return Color.white.opacity(0.3) }
+        return openCodeGoProvider?.error?.contains("rejected") == true ? Pace.warn : Pace.good
+    }
+
+    private func saveOpenCodeGoKey() {
+        let key = openCodeGoKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            if await store.saveOpenCodeGoKey(key) {
+                editingOpenCodeGoKey = false
+                openCodeGoKey = ""
+                openCodeGoKeyError = nil
+            } else {
+                openCodeGoKeyError = "Could not save the key in Keychain"
             }
         }
     }
