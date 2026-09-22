@@ -10,6 +10,10 @@ published with generated notes on the
 
 ### Added
 
+- OpenCode Go as a usage provider, with 5-hour, weekly, and monthly quota
+  windows from its usage API. The direct build discovers active OpenCode
+  credentials and supported environment sources; Settings can store a key in
+  Keychain for either edition.
 - Multiple Claude Code profiles at once — for example Claude Personal beside
   Claude Team — each with its own quota rows, labels, visibility, and plan badge.
   The direct-download build can also notice running Claude Code processes;

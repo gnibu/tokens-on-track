@@ -14,6 +14,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var report: Report?
     @Published private(set) var isRefreshing = false
     @Published private(set) var hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+    @Published private(set) var hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
     @Published private(set) var hasSavedCursorKey = CursorKeychain.read() != nil
     @Published private(set) var statusImage: NSImage = StatusIcon.image(segments: [])
     /// Spells out both readings for whatever the item is drawn as, since the
@@ -402,6 +403,8 @@ final class UsageStore: ObservableObject {
                         ),
                     profilePath: entry.normalizedPath
                 ))
+            } else if id == Fetcher.openCodeGoID {
+                providers.append(Fetcher.openCodeGoProvider())
             } else if id == Fetcher.openRouterID {
                 providers.append(Provider(name: "OpenRouter"))
             } else if id == Fetcher.cursorID {
@@ -436,6 +439,22 @@ final class UsageStore: ObservableObject {
     func removeOpenRouterKey() async -> Bool {
         let removed = OpenRouterKeychain.remove()
         hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
+        if removed { await refresh() }
+        return removed
+    }
+
+    @discardableResult
+    func saveOpenCodeGoKey(_ key: String) async -> Bool {
+        let saved = OpenCodeGoKeychain.save(key)
+        hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
+        if saved { await refresh() }
+        return saved
+    }
+
+    @discardableResult
+    func removeOpenCodeGoKey() async -> Bool {
+        let removed = OpenCodeGoKeychain.remove()
+        hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
         if removed { await refresh() }
         return removed
     }

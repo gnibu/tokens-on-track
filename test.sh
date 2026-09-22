@@ -17,6 +17,8 @@ swiftc -parse-as-library "$@" \
     Sources/AIUsage/Report.swift \
     Sources/AIUsage/OpenRouter.swift \
     Sources/AIUsage/OpenRouterKeychain.swift \
+    Sources/AIUsage/OpenCodeGo.swift \
+    Sources/AIUsage/OpenCodeGoKeychain.swift \
     Sources/AIUsage/Cursor.swift \
     Sources/AIUsage/CursorKeychain.swift \
     Sources/AIUsage/WorkSchedule.swift \

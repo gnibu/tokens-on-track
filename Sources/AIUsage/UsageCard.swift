@@ -272,6 +272,7 @@ struct OutageNotice: View {
     /// What went wrong, in the reader's terms. A vanished transient Conductor
     /// key gets an actionable route to the reliable credential field.
     private static func outageReason(_ provider: Provider) -> String {
+        if let reconnect = OpenCodeGoCredential.reconnectMessage(for: provider) { return reconnect }
         if let reconnect = OpenRouterCredential.reconnectMessage(for: provider) { return reconnect }
         if let reconnect = CursorCredential.reconnectMessage(for: provider) { return reconnect }
         return provider.error ?? "no reading"

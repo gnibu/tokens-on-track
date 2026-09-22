@@ -72,7 +72,7 @@ An app record must exist before uploading a build. See
 - [x] Add the project, entitlements, reproducible build instructions, and ignore rules for private signing files and local Xcode state. Changes are prepared in the working tree; not committed yet.
 - [x] Enable App Sandbox, outgoing network, read-only user-selected folders, and app-scoped bookmarks; verify the exported entitlements.
 - [x] Implement Codex/Cursor folder selection and bookmarks, including cancellation, invalid selection, stale/removed grants, and credential replacement. Unit tests and sandboxed grant/relaunch checks pass; interactive chooser testing remains below.
-- [x] Keep provider-owned credentials read-only and retain the existing app-owned Keychain storage for manually entered OpenRouter/Cursor keys. A disposable Keychain add/read/delete test passes; real Settings key entry/removal still needs TestFlight testing.
+- [x] Keep provider-owned credentials read-only and retain the existing app-owned Keychain storage for manually entered OpenCode Go/OpenRouter/Cursor keys. A disposable Keychain add/read/delete test passes; real Settings key entry/removal still needs TestFlight testing.
 - [x] Exclude process/environment discovery from Store builds and explain supported connections in Settings.
 - [x] Verify Store cache writes inside the container and document migration: no old cache copy, new folder grants required, preference/Keychain continuity needs a clean-upgrade test.
 - [x] Bundle an accessible privacy policy and support link; add the UserDefaults required-reason privacy manifest. Public policy hosting remains a release task.
@@ -86,7 +86,7 @@ business model is a paid app download.
 - [x] Pass both direct and Store regression suites, create a universal archive, export a distribution-signed package, and verify app/package signatures locally.
 - [ ] Upload through Xcode Organizer using App Store Connect distribution; resolve processing or validation errors. See [Apple's upload instructions](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/).
 - [ ] Install the processed build through TestFlight and test on another Mac or a clean account without the prototype's permissions.
-- [ ] Verify live reads from all four providers, including first-time Claude Keychain consent and a newly entered OpenRouter key.
+- [ ] Verify live reads from all five providers, including first-time Claude Keychain consent and newly entered OpenCode Go and OpenRouter keys.
 - [ ] Exercise the actual folder chooser and cancellation; test permissions and credential replacement on a fresh account. Saved-bookmark relaunch with live providers and unit tests for removal/revocation/replacement already pass locally.
 - [ ] Verify menu bar, desktop card, notifications, user-enabled launch at login, offline behavior, stale credentials, and API errors.
 - [ ] Test the advertised macOS versions and architectures; correct the declared support if necessary.

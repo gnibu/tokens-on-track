@@ -42,6 +42,13 @@ enum RegressionTests {
         testOpenCodeOpenRouterCredentialIsParsed()
         testConductorCredentialEnvironmentIsParsed()
         testOpenRouterDollarFormatting()
+        testOpenCodeGoUsageWindowsAreParsed()
+        testOpenCodeGoMalformedWindowsAreSkipped()
+        testOpenCodeGoVisibilityRequiresGoOrManualKey()
+        testOpenCodeGoProviderPresentation()
+        testOpenCodeGoLegacyCredentialIsParsed()
+        testOpenCodeGoAccountCredentialIsParsed()
+        testOpenCodeGoEnvironmentCredentialIsParsed()
         testCursorSummaryBecomesCycleWindows()
         testCursorSummaryOmitsZeroBreakdown()
         testCursorProSpendUnderOneThousandCents()
@@ -510,6 +517,135 @@ enum RegressionTests {
         )
     }
 
+    // ----------------------------------------------------------------- //
+    // OpenCode Go's own quota endpoint reports three percentages directly.
+    // ----------------------------------------------------------------- //
+
+    private static func testOpenCodeGoUsageWindowsAreParsed() {
+        let fixture: [String: Any] = [
+            "usage": [
+                "rolling": [
+                    "status": "ok",
+                    "percent": 42,
+                    "resetsAt": "2026-09-22T15:30:00.000Z",
+                ],
+                "weekly": [
+                    "status": "ok",
+                    "percent": 17.5,
+                    "resetsAt": "2026-09-28T00:00:00.000Z",
+                ],
+                "monthly": [
+                    "status": "rate-limited",
+                    "percent": 100,
+                    "resetsAt": "2026-10-14T10:44:14.289Z",
+                ],
+            ],
+        ]
+        let windows = OpenCodeGoUsage.windows(from: fixture)
+        check(windows.map(\.label) == ["5h", "week", "month"], "OpenCode Go must expose all three quota windows")
+        check(windows.map(\.percent) == [42, 17.5, 100], "OpenCode Go percentages must be preserved")
+        check(
+            windows.map(\.windowSeconds) == [5 * 3600, 7 * 86400, 30 * 86400],
+            "fixed OpenCode Go windows must carry their known durations"
+        )
+        check(windows.allSatisfy { $0.resetsAt != nil }, "OpenCode Go reset timestamps must be parsed")
+    }
+
+    private static func testOpenCodeGoMalformedWindowsAreSkipped() {
+        let fixture: [String: Any] = [
+            "usage": [
+                "rolling": ["percent": Double.nan, "resetsAt": "nope"],
+                "weekly": ["percent": 20, "resetsAt": "2026-09-28T00:00:00Z"],
+                "monthly": ["status": "ok"],
+            ],
+        ]
+        let windows = OpenCodeGoUsage.windows(from: fixture)
+        check(windows.map(\.label) == ["week"], "malformed OpenCode Go windows must not become healthy zeroes")
+    }
+
+    private static func testOpenCodeGoVisibilityRequiresGoOrManualKey() {
+        check(
+            !OpenCodeGoUsage.shouldShowProvider(hasManualKey: false, hasUsage: false),
+            "a general auto-discovered OpenCode key must not expose a broken Go card"
+        )
+        check(
+            OpenCodeGoUsage.shouldShowProvider(hasManualKey: true, hasUsage: false),
+            "a key saved in Settings must keep Go errors visible and actionable"
+        )
+        check(
+            OpenCodeGoUsage.shouldShowProvider(hasManualKey: false, hasUsage: true),
+            "valid Go quota data must expose the provider for auto-discovered keys"
+        )
+    }
+
+    private static func testOpenCodeGoProviderPresentation() {
+        let provider = Fetcher.openCodeGoProvider()
+        check(provider.id == "OpenCode Go", "OpenCode Go must retain its stable provider identity")
+        check(provider.kind == "opencode-go", "OpenCode Go must retain its provider mark and settings kind")
+        check(provider.name == "OpenCode", "the card must not repeat the Go service tier in its name")
+        check(provider.plan == "GO", "Go must remain visible as the service-tier badge")
+    }
+
+    private static func testOpenCodeGoLegacyCredentialIsParsed() {
+        let primary = Data(#"{"opencode-go":{"type":"api","key":"sk-go-primary"},"opencode":{"type":"api","key":"sk-go-legacy"}}"#.utf8)
+        check(
+            OpenCodeGoCredential.key(inLegacyAuth: primary) == "sk-go-primary",
+            "the dedicated OpenCode Go auth entry must win"
+        )
+        let legacy = Data(#"{"opencode":{"type":"api","key":"sk-go-legacy"}}"#.utf8)
+        check(
+            OpenCodeGoCredential.key(inLegacyAuth: legacy) == "sk-go-legacy",
+            "the old OpenCode provider entry must remain readable"
+        )
+        let wrongType = Data(#"{"opencode-go":{"type":"oauth","key":"secret"}}"#.utf8)
+        check(OpenCodeGoCredential.key(inLegacyAuth: wrongType) == nil, "only strict API-key entries may be read")
+    }
+
+    private static func testOpenCodeGoAccountCredentialIsParsed() {
+        let fixture = Data(#"""
+        {
+          "version": 2,
+          "accounts": {
+            "account_1": {
+              "id": "account_1",
+              "serviceID": "opencode-go",
+              "credential": {"type": "api", "key": "sk-go-v2"}
+            }
+          },
+          "active": {"opencode-go": "account_1"}
+        }
+        """#.utf8)
+        check(
+            OpenCodeGoCredential.key(inAccountStore: fixture) == "sk-go-v2",
+            "OpenCode's active v2 account must supply its Go key"
+        )
+        let inactive = Data(#"""
+        {
+          "version": 2,
+          "accounts": {
+            "account_1": {
+              "serviceID": "opencode-go",
+              "credential": {"type": "api", "key": "inactive-secret"}
+            }
+          },
+          "active": {}
+        }
+        """#.utf8)
+        check(OpenCodeGoCredential.key(inAccountStore: inactive) == nil, "inactive v2 accounts must not be selected")
+    }
+
+    private static func testOpenCodeGoEnvironmentCredentialIsParsed() {
+        check(
+            OpenCodeGoCredential.key(inProcessEnvironment: "PATH=/bin OPENCODE_API_KEY=sk-go OTHER=x") == "sk-go",
+            "the standard OpenCode API key environment value must be detected"
+        )
+        check(
+            OpenCodeGoCredential.key(inProcessEnvironment: "OPENCODE_GO_API_KEY=sk-specific OPENCODE_API_KEY=sk-general")
+                == "sk-specific",
+            "the Go-specific environment value must win when both are present"
+        )
+    }
+
     private static func testCursorSummaryBecomesCycleWindows() {
         let summary: [String: Any] = [
             "billingCycleStart": "2026-09-11T16:23:42.215Z",
@@ -773,6 +909,7 @@ enum RegressionTests {
         for (provider, file) in [
             ("Claude", "claude.svg"),
             ("Codex", "openai.svg"),
+            ("opencode-go", "opencode.svg"),
             ("OpenRouter", "openrouter.svg"),
             ("Cursor", "cursor.svg"),
         ] {
@@ -817,6 +954,26 @@ enum RegressionTests {
         check(
             close(BrandGlyph.width(for: "OpenRouter", height: 14), 14),
             "OpenRouter's compact mark must keep a square slot"
+        )
+        check(
+            close(BrandGlyph.width(for: "opencode-go", height: 14), 14),
+            "OpenCode's favicon mark must use the same square slot as other marks"
+        )
+        let openCodeMark = BrandGlyph.path(
+            for: "opencode-go",
+            fitting: NSSize(width: 14, height: 14),
+            flipped: false
+        )
+        check(
+            close(openCodeMark.map { Double($0.bounds.height) }, 14, tolerance: 0.1),
+            "OpenCode's favicon mark must fill the provider-mark height"
+        )
+        check(
+            openCodeMark?.contains(NSPoint(x: 1, y: 1)) == false
+                && openCodeMark?.contains(NSPoint(x: 2, y: 2)) == true
+                && openCodeMark?.contains(NSPoint(x: 7, y: 7)) == false
+                && openCodeMark?.contains(NSPoint(x: 7, y: 13)) == true,
+            "OpenCode's enlarged favicon mark must keep its centre transparent"
         )
         check(
             close(BrandGlyph.width(for: "Cursor", height: 14), 14),
@@ -1795,7 +1952,7 @@ enum RegressionTests {
         )
         let ids = Fetcher.pollTargetIDs(claudeTargets: [], codexTargets: [defaultCodex, workCodex])
         check(
-            ids == [defaultCodex.id, workCodex.id, Fetcher.openRouterID, Fetcher.cursorID],
+            ids == [defaultCodex.id, workCodex.id, Fetcher.openCodeGoID, Fetcher.openRouterID, Fetcher.cursorID],
             "both Codex profiles must be independent poll targets in profile order"
         )
     }
