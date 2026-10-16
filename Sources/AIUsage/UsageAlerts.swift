@@ -20,8 +20,24 @@ enum UsageAlerts {
         var lastPercent: Double?
         var resetAnnounced: Bool?
 
+        /// Claude reports the same weekly reset as 11:59:59 on one poll and
+        /// 12:00:00 on the next. A move of under an hour is that jitter, not a
+        /// new window, and must not re-arm alerts already sent.
+        func sameWindow(as resetsAt: Int?) -> Bool {
+            guard let old = self.resetsAt, let new = resetsAt else { return self.resetsAt == resetsAt }
+            return abs(new - old) < 3600
+        }
+
         mutating func advance(to resetsAt: Int?) {
-            if self.resetsAt != resetsAt { self = Mark(resetsAt: resetsAt) }
+            if !sameWindow(as: resetsAt) { self = Mark(resetsAt: resetsAt) }
+        }
+
+        /// The flat usage threshold is only worth saying while spending is
+        /// ahead of an even burn: 61% of the week on Friday is on track.
+        func usageAlert(for window: UsageWindow, threshold: Double, timing: Pace.Timing) -> Bool {
+            guard !usageSent, window.percent >= threshold else { return false }
+            guard let target = Pace.targetPercent(window, timing: timing) else { return true }
+            return window.percent > target
         }
 
         /// Called only after macOS accepts the notification request.

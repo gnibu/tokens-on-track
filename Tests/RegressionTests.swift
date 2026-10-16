@@ -33,6 +33,7 @@ enum RegressionTests {
         testWeeklyQuotaResetDetection()
         testNewResetCreditDetection()
         testPaceAlertsEscalateOncePerWindow()
+        testUsageAlertOnlyWhenAheadOfTarget()
         testPaceAlertsStayQuietAtTheStartOfTheWindow()
         testSeverePaceAlertSkipsTheLowerStage()
         testPaceAlertsRespectCustomThresholds()
@@ -2368,12 +2369,21 @@ enum RegressionTests {
         mark.lastPercent = 85
         mark.advance(to: mark.resetsAt)
         check(mark.severePaceSent == true && mark.usageSent, "same reset time must keep acknowledgements")
-        mark.advance(to: (mark.resetsAt ?? 0) + 1_000)
+        mark.advance(to: (mark.resetsAt ?? 0) + 1)
+        check(mark.usageSent && mark.severePaceSent == true, "a reset time jittering by a second must keep acknowledgements")
+        mark.advance(to: (mark.resetsAt ?? 0) + 3_600)
         check(!mark.paceSent && mark.severePaceSent != true && !mark.usageSent && mark.lastPercent == nil, "a new window must clear every stage and previous usage")
         var nextWindow = offTrack
         nextWindow.resetsAt = mark.resetsAt
-        let nextTiming = Pace.Timing(now: now.addingTimeInterval(1_000))
+        let nextTiming = Pace.Timing(now: now.addingTimeInterval(3_600))
         check(mark.paceAlert(for: nextWindow, threshold: 1.5, timing: nextTiming) == .offTrack, "a reset must re-arm the early warning")
+    }
+
+    private static func testUsageAlertOnlyWhenAheadOfTarget() {
+        let mark = UsageAlerts.Mark()
+        check(!mark.usageAlert(for: window(percent: 61, elapsedPercent: 87), threshold: 60, timing: wallTiming), "61% of the week the day before reset is on track")
+        check(mark.usageAlert(for: window(percent: 61, elapsedPercent: 40), threshold: 60, timing: wallTiming), "61% at 40% elapsed is ahead and must alert")
+        check(!mark.usageAlert(for: window(percent: 50, elapsedPercent: 20), threshold: 60, timing: wallTiming), "below the threshold never alerts")
     }
 
     private static func testPaceAlertsStayQuietAtTheStartOfTheWindow() {

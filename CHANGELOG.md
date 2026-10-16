@@ -61,6 +61,10 @@ published with generated notes on the
 
 ### Fixed
 
+- The usage alert no longer fires while a window is on or under target, e.g.
+  61% of the week the day before it resets.
+- Alerts no longer repeat every poll when Claude's reset time flips between
+  `11:59:59` and `12:00:00`; a reset moving by under an hour is the same window.
 - Row labels such as `5h` and `week` no longer render shrunk in the first
   provider block when more than one provider is shown.
 

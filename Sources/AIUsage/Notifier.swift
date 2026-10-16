@@ -89,7 +89,7 @@ enum Notifier {
                 }
 
                 // A new reset instant means a new window: forget what we said.
-                if mark.resetsAt != window.resetsAt {
+                if !mark.sameWindow(as: window.resetsAt) {
                     mark.advance(to: window.resetsAt)
                 } else if announced {
                     // Said when the reset time passed; the provider reporting
@@ -100,12 +100,11 @@ enum Notifier {
 
                 if evaluateUsage,
                    preferences.usageAlertsEnabled,
-                   !mark.usageSent,
-                   window.percent >= preferences.usageThreshold {
+                   mark.usageAlert(for: window, threshold: preferences.usageThreshold, timing: timing) {
                     post(
                         title: "\(provider.name) \(window.label) at \(Int(window.percent.rounded()))%",
                         body: "Resets \(Pace.resetLabel(window.resetsAt)).",
-                        id: "\(key)/usage/\(window.resetsAt ?? 0)"
+                        id: "\(key)/usage/\(mark.resetsAt ?? 0)"
                     ) {
                         acknowledge(.usage, key: key, resetsAt: window.resetsAt)
                     }
@@ -123,7 +122,7 @@ enum Notifier {
                             window.percent, max(0, 100 - window.percent), window.percent / target,
                             target, Pace.resetLabel(window.resetsAt)
                         ),
-                        id: "\(key)/\(severe ? "severe-pace" : "pace")/\(window.resetsAt ?? 0)"
+                        id: "\(key)/\(severe ? "severe-pace" : "pace")/\(mark.resetsAt ?? 0)"
                     ) {
                         acknowledge(kind, key: key, resetsAt: window.resetsAt)
                     }
@@ -172,7 +171,7 @@ enum Notifier {
         var marks = loadMarks()
         // A late completion must not acknowledge a different quota window or
         // overwrite another notification's successful acknowledgement.
-        guard var mark = marks[key], mark.resetsAt == resetsAt else { return }
+        guard var mark = marks[key], mark.sameWindow(as: resetsAt) else { return }
         mark.acknowledge(kind)
         marks[key] = mark
         saveMarks(marks)
