@@ -282,6 +282,8 @@ final class UsageStore: ObservableObject {
     }
 
     private func refresh(ids: [String]?, full: Bool) async {
+        // Store screenshots: show the sample cache under AI_USAGE_DIR as written.
+        guard ProcessInfo.processInfo.environment["AI_USAGE_FROZEN"] == nil else { return }
         guard !isRefreshing else { return }
         isRefreshing = true
         defer {

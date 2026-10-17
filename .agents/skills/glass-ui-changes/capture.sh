@@ -24,7 +24,7 @@ set -eu
 cd "$(dirname "$0")/../../.."
 
 HERE=".agents/skills/glass-ui-changes"
-OUT="docs/screenshots"
+OUT="${OUT:-docs/screenshots}"
 CLICK="/tmp/tot-click"
 WINS="/tmp/tot-wins"
 
@@ -67,7 +67,13 @@ shot() { screencapture -x -l "$1" -o -t png "$2" && echo "    $2  $(file -b "$2"
 # safe, but check it anyway if the menu bar is crowded.
 # --------------------------------------------------------------------- #
 echo "==> menu bar item"
-ITEM="$(ax '{position, size} of menu bar item 1 of menu bar 1')"
+# The status item is not always `menu bar 1`: on macOS 27 an empty 0x0 item
+# sits there and the real one is in `menu bar 2`. Take the first with a size.
+ITEM=""
+for BAR in 1 2; do
+    ITEM="$(ax "{position, size} of menu bar item 1 of menu bar ${BAR}" 2>/dev/null || true)"
+    [ "$(echo "$ITEM" | cut -d, -f3 | tr -d ' ')" -gt 0 ] 2>/dev/null && break
+done
 IX=$(echo "$ITEM" | cut -d, -f1 | tr -d ' ')
 IY=$(echo "$ITEM" | cut -d, -f2 | tr -d ' ')
 IW=$(echo "$ITEM" | cut -d, -f3 | tr -d ' ')
@@ -88,16 +94,16 @@ PANEL="$(panel_id)"
 [ -n "$PANEL" ] || fail 'the dropdown did not open. See SKILL.md step 2.'
 shot "$PANEL" "${OUT}/dropdown-usage.png"
 
-# The Settings tab centre, measured off dropdown-usage.png: (270, 29) from the
+# The Settings tab centre, measured off dropdown-usage.png: (155, 30) from the
 # panel's own top-left.
 #
 # That origin comes from CGWindow, not AX. `window 1` is not dependable here —
 # with the panel open, AX has been seen returning both windows on one call and
-# only the desktop card on the next, at which point (270, 29) is measured from
+# only the desktop card on the next, at which point (155, 30) is measured from
 # the card on another display and the click lands on the desktop.
 set -- $(panel_origin)
 FX="$1"; FY="$2"
-"$CLICK" "$((FX + 270))" "$((FY + 29))"
+"$CLICK" "$((FX + 155))" "$((FY + 30))"
 sleep 1
 PANEL="$(panel_id)"
 [ -n "$PANEL" ] || fail 'the Settings tab click closed the dropdown.
