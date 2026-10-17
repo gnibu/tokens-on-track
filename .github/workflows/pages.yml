@@ -1,0 +1,32 @@
+# Publishes the bundled privacy policy at
+# https://gnibu.github.io/tokens-on-track/privacy.html, the URL App Store
+# Connect asks for. Resources/Privacy.html stays the only copy.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: [Resources/Privacy.html, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency: pages
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}privacy.html
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir site && cp Resources/Privacy.html site/privacy.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -13,8 +13,11 @@ signing uses Xcode's Apple account, not the direct-release `.env` settings.
 
 ## Archive and export
 
-In Xcode, use **Product → Archive**, then Organizer → **Distribute App → App
-Store Connect**. For a local package without uploading:
+`make publish-store` runs the Store tests, archives, and uploads to App Store
+Connect in one go (see the `Makefile` header for API-key sign-in). The app
+record must already exist. Manually: in Xcode, use **Product → Archive**, then
+Organizer → **Distribute App → App Store Connect**. For a local package without
+uploading:
 
 ```sh
 xcodebuild -project TokensOnTrack.xcodeproj \
@@ -92,9 +95,10 @@ names are preserved, but consent/access across distribution signatures still
 needs TestFlight verification. No credential migration writes are performed.
 
 The app bundles `Resources/Privacy.html`, linked from Settings, plus a privacy
-manifest declaring local UserDefaults access (`CA92.1`). Publish a public
-privacy-policy URL and complete App Store Connect's privacy questionnaire
-before submission. Support links to the repository's GitHub issues.
+manifest declaring local UserDefaults access (`CA92.1`). The same file is
+published at https://gnibu.github.io/tokens-on-track/privacy.html by
+`.github/workflows/pages.yml` on every push to main that changes it; use that
+URL in App Store Connect. Support links to the repository's GitHub issues.
 
 ## Verification
 
@@ -126,3 +130,27 @@ automation session lacked Accessibility permission; the settings view was
 rendered and visually checked in the local harness. App Store Connect upload
 validation and App Review have not been performed. See the
 [release checklist](app-store-release.md) for the remaining steps.
+
+## Store screenshots
+
+`docs/app-store-screenshots/` holds the 2880×1800 listing images. To redo them,
+quit the app, back up `~/Library/Preferences/io.github.ai-usage.plist`, turn on
+the desktop card, then:
+
+```sh
+./build.sh --install && osascript -e 'quit app "Tokens on Track"'
+python3 scripts/sample-usage.py /tmp/tot-sample
+open --env AI_USAGE_DIR=/tmp/tot-sample --env AI_USAGE_FROZEN=1 "/Applications/Tokens on Track.app"
+OUT=.context/shots .agents/skills/glass-ui-changes/capture.sh
+python3 scripts/store-screenshots.py .context/shots docs/app-store-screenshots
+```
+
+`AI_USAGE_FROZEN` stops all polling, so only the sample data is shown. Saved
+budgets still apply. Restore the preferences and relaunch normally afterwards.
+
+Shots 2 and 3 crop the Alerts and Working hours groups out of
+`.context/shots/settings-full.png`, the whole Settings tab in one window. The
+panel scrolls, so capture it from a throwaway build whose `cap` in
+`PanelView.swift` returns 4000, then reinstall the normal build. The notification
+banners in shot 2 are drawn by the script, using the exact text `Notifier.swift`
+posts.

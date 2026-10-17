@@ -3,16 +3,52 @@
 <title>Tokens on Track — Privacy</title>
 <style>body{font:17px/1.6 system-ui;max-width:720px;margin:60px auto;padding:0 24px;color:#222}h1,h2{line-height:1.2}a{color:#2863c0}@media(prefers-color-scheme:dark){body{background:#171717;color:#eee}a{color:#91baff}}</style>
 </head><body>
-<h1>Tokens on Track privacy policy</h1><p>Updated September 22, 2026 · Tenjin Tech</p>
-<p>Tokens on Track displays usage from AI provider accounts you connect. It has no developer-operated account, analytics service, advertising, or tracking.</p>
-<h2>Credentials and connections</h2>
-<p>The app reads your Claude Code login from macOS Keychain. The App Store build reads Codex and Cursor login files only from folders you explicitly allow. It never writes to those providers’ credential stores. Folder permissions are stored as macOS security-scoped bookmarks and can be removed in Settings.</p>
-<p>API keys you enter for OpenCode Go, OpenRouter, or Cursor are stored in this Mac’s Keychain. You can remove those saved keys in Settings. The direct-download build can also discover credentials from local provider files, environment variables, and supported Conductor processes. The App Store build does not inspect other processes or their environments.</p>
-<h2>Network requests</h2>
-<p>Credentials are sent to the corresponding provider to request your account’s usage: Anthropic, OpenAI, OpenCode, OpenRouter, or Cursor. Requests include the information needed to authenticate, such as account identifiers, tokens, or session cookies. Providers receive your IP address and handle these requests under their own privacy policies. Tenjin Tech does not receive your credentials or usage readings.</p>
+<h1>Tokens on Track privacy policy</h1><p>Effective October 17, 2026 · Tenjin Tech</p>
+<p>This policy explains how the Tokens on Track app for macOS (“the app”) handles information, and the choices and rights you have. “We”, “us” and “our” mean Tenjin Tech, the developer of the app.</p>
+<p><strong>In short:</strong> the app works on your Mac. We do not run accounts, servers, analytics, advertising or tracking for it, and we do not receive your credentials, usage readings or anything else the app processes. The app talks only to the AI providers you connect.</p>
+
+<h2>Who is responsible</h2>
+<p>Tenjin Tech is the data controller for the limited personal data we receive, described under “Information we receive”. Contact: <a href="mailto:tokensontrack@tenjintech.fr">tokensontrack@tenjintech.fr</a>. The seller details Apple shows on the App Store page also identify us.</p>
+
+<h2>Information the app processes on your Mac</h2>
+<p>This information stays on your Mac or goes directly to the provider it belongs to. We have no access to it.</p>
+<p><strong>Credentials and connections.</strong> The app reads your Claude Code login from macOS Keychain. The App Store build reads Codex and Cursor login files only from folders you explicitly allow. It never writes to those providers’ credential stores. Folder permissions are stored as macOS security-scoped bookmarks and can be removed in Settings. API keys you enter for OpenCode Go, OpenRouter, or Cursor are stored in this Mac’s Keychain and can be removed in Settings. The direct-download build can also discover credentials from local provider files, environment variables, and supported Conductor processes. The App Store build does not inspect other processes or their environments.</p>
+<p><strong>Usage readings and preferences.</strong> Preferences, folder permissions, notification state, and a cache of usage readings are stored locally. Usage readings can include plan names, limits, spending, and reset times. Notifications are handled by macOS. The App Store build keeps its files in its app container.</p>
+<p><strong>Agent connection.</strong> If you set up the optional agent connection (Model Context Protocol), a coding agent on this Mac can ask the app for the cached usage readings. That connection runs locally, never contacts a provider, and shares no credentials.</p>
 <p>The app does not read conversation content, prompts, or source code.</p>
-<h2>Data on your Mac</h2>
-<p>Preferences, folder permissions, notification state, and a cache of usage readings are stored locally. Usage readings can include plan names, limits, spending, and reset times. Notifications are handled by macOS. The App Store build keeps its files in its app container.</p>
-<h2>Support</h2>
-<p>If you contact us, we receive the information you choose to send. GitHub issues are public: never include API keys, login files, or other private account details. See the <a href="https://github.com/gnibu/tokens-on-track/issues">support page</a> for questions and privacy requests.</p>
+
+<h2>Requests to AI providers</h2>
+<p>To show your usage, the app sends your credentials over encrypted connections (HTTPS) to the corresponding provider: Anthropic, OpenAI, OpenCode, OpenRouter, or Cursor. Requests include the information needed to authenticate, such as account identifiers, tokens, or session cookies. Providers receive your IP address. When you choose to redeem a Codex reset credit, the app sends that request to OpenAI on your behalf; it makes no other changes to your provider accounts.</p>
+<p>These requests go directly from your Mac to the provider. The provider handles them under its own terms and privacy policy, and we are not responsible for its practices. Connect only accounts you are authorized to use.</p>
+
+<h2>Information we receive</h2>
+<ul>
+<li><strong>Support messages.</strong> If you contact us, we receive the information you choose to send, such as your name, email address and message. We use it only to answer you, on the basis of your request and our legitimate interest in supporting the app. GitHub issues are public: never include API keys, login files, or other private account details.</li>
+<li><strong>App Store purchases.</strong> Apple processes purchases, payments and downloads under its own <a href="https://www.apple.com/legal/privacy/">privacy policy</a>. Apple gives us sales and download reports that do not identify you to us.</li>
+<li><strong>Crash reports and app analytics.</strong> Only if you have chosen in macOS to share analytics with app developers, Apple may provide us with crash reports and aggregated usage statistics that Apple does not link to your identity. You can change this in System Settings → Privacy &amp; Security → Analytics &amp; Improvements.</li>
+</ul>
+
+<h2>What we do not do</h2>
+<p>We do not sell or rent personal data, share it for advertising, track you across apps or websites, build profiles about you, or make automated decisions that affect you.</p>
+
+<h2>Retention and deletion</h2>
+<p>Data the app stores on your Mac remains there until you remove it. Use <strong>Remove</strong> in Settings for saved keys and folder permissions, or delete the app; the App Store build’s files are removed with its container. We keep support messages only as long as needed to handle your request and any follow-up, then delete them. You can delete your own GitHub issues and comments subject to GitHub’s rules.</p>
+
+<h2>Your rights</h2>
+<p>Depending on where you live, including under the EU and UK General Data Protection Regulation and California privacy law, you may have the right to access, correct, delete, restrict or object to the processing of your personal data, to receive it in a portable format, and to withdraw consent. We will not discriminate against you for exercising these rights. Because the app’s data never reaches us, most requests concern only support messages. To make a request, contact us using the details above; we may need to confirm your identity first. You also have the right to complain to your local data protection authority.</p>
+
+<h2>Security</h2>
+<p>The app keeps credentials in macOS Keychain or in provider files you have allowed, and communicates with providers over HTTPS. No method of storage or transmission is completely secure, so we cannot guarantee absolute security. Keeping your Mac and provider accounts secure remains your responsibility.</p>
+
+<h2>International transfers</h2>
+<p>If you contact us through GitHub or email, your message may be processed in countries other than your own, including the United States, by those service providers under their own safeguards.</p>
+
+<h2>Children</h2>
+<p>The app is a tool for developers and is not directed to children. We do not knowingly collect personal data from children under 13, or under 16 where local law sets a higher age. If you believe a child has sent us personal data, contact us and we will delete it.</p>
+
+<h2>Changes to this policy</h2>
+<p>We may update this policy as the app changes. We will post the new version with a new effective date, at this address and in the app, and note significant changes in the release notes. Continuing to use the app after an update means the updated policy applies.</p>
+
+<h2>Contact</h2>
+<p>For privacy questions or requests, email <a href="mailto:tokensontrack@tenjintech.fr">tokensontrack@tenjintech.fr</a>. For general support, see the <a href="https://github.com/gnibu/tokens-on-track/issues">support page</a>.</p>
 </body></html>
