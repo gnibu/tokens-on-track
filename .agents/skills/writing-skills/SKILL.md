@@ -11,20 +11,20 @@ what the code already says.
 
 ## Layout
 
-Skills live in `.agents/skills/` and are exposed to Claude Code by a symlink per
-skill:
+Skills live in `.agents/skills/`. Claude Code sees all of them through one
+directory symlink, `.claude/skills -> ../.agents/skills`, so a new skill needs no
+link of its own — don't add one, it would land inside the skill folder:
 
 ```sh
-mkdir -p .agents/skills/<name> .claude/skills
+mkdir -p .agents/skills/<name>
 $EDITOR .agents/skills/<name>/SKILL.md
-ln -s ../../.agents/skills/<name> .claude/skills/<name>
 ```
 
-Relative symlink, always — an absolute one breaks the moment the repo is cloned,
+The link is relative — an absolute one breaks the moment the repo is cloned,
 moved, or opened in another Conductor workspace. Check it from the repo root:
 
 ```sh
-ls -l .claude/skills/          # -> <name> -> ../../.agents/skills/<name>
+ls -l .claude/skills           # -> ../.agents/skills
 cat .claude/skills/<name>/SKILL.md | head -3
 ```
 
