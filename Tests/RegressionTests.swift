@@ -29,6 +29,8 @@ enum RegressionTests {
         testCodexAuthParsingAndDuplicateCollapse()
         testCodexResetCreditsParsing()
         testCodexRedemptionOutcomes()
+        testClaudeResetGrants()
+        testClaudeResetRedemptionOutcomes()
         testResetCreditsSurviveCacheAndCarryOver()
         testWeeklyQuotaResetDetection()
         testNewResetCreditDetection()
@@ -2276,6 +2278,71 @@ enum RegressionTests {
             Fetcher.codexResetCredits(["available_count": 1, "applicable_available_count": 5])?.usableNow == 1,
             "usable credits can never exceed available ones"
         )
+    }
+
+    private static func testClaudeResetGrants() {
+        let date = ISO8601DateFormatter().date(from: "2026-10-22T15:00:00Z")!
+        let grant: [String: Any] = [
+            "id": "opus55-launch-promax-20260921", "resets_total": 1, "resets_left": 1,
+            "starts_at": "2026-09-22T16:00:00+00:00", "ends_at": "2026-10-22T16:00:00+00:00",
+            "paused": false, "usable_now": true,
+            "clears": ["five_hour", "seven_day", "seven_day_overage_included"],
+        ]
+        func parse(_ grants: [[String: Any]], eligible: Bool = true) -> ResetCredits? {
+            Fetcher.claudeResetCredits(["eligible": eligible, "grants": grants], now: date)
+        }
+        let credits = parse([grant])!
+        check(credits.available == 1 && credits.usableNow == 1, "Claude's observed full reset must be available before expiry")
+        check(credits.nextClaudeGrant?.id == grant["id"] as? String, "redemption must retain the account's grant ID")
+        check(credits.nextClaudeGrant?.scopeDescription.contains("weekly reset time stays the same") == true, "Claude confirmation must preserve the weekly schedule")
+        let decoded = try? JSONDecoder().decode(ResetCredits.self, from: JSONEncoder().encode(credits))
+        check(decoded == credits, "Claude grant metadata must survive caching")
+        check(decoded?.current(at: date.addingTimeInterval(3600)).available == 0, "a cached reset must disappear at its exact expiry without a network poll")
+        var provider = Provider(id: "Claude Code-credentials", kind: "claude", name: "Claude")
+        provider.ok = true
+        provider.loggedIn = true
+        provider.resetCredits = credits
+        let report = Report(providers: [provider], date: date)
+        let live = AgentServer.usage(report, now: date)["providers"] as? [[String: Any]]
+        let expired = AgentServer.usage(report, now: date.addingTimeInterval(3600))["providers"] as? [[String: Any]]
+        check(live?.first?["reset_credits"] != nil, "MCP must expose an active Claude reset")
+        check(expired?.first?["reset_credits"] == nil, "MCP must not offer an expired cached reset")
+        check(parse([grant, grant])?.available == 1, "duplicate grants must not inflate the count")
+        check(parse([grant], eligible: false)?.available == 0, "ineligible accounts must not expose spendable resets")
+        check(Fetcher.claudeResetCredits(nil, now: date) == nil, "an absent reset block must stay unknown")
+
+        for (key, value) in [
+            ("paused", true as Any), ("ends_at", "2026-10-22T15:00:00Z" as Any),
+            ("starts_at", "2026-10-23T15:00:00Z" as Any), ("ends_at", "bad-date" as Any),
+            ("resets_left", -1 as Any), ("resets_left", 1.5 as Any),
+            ("resets_left", true as Any), ("resets_left", "1" as Any),
+            ("resets_total", 0 as Any), ("paused", "false" as Any),
+            ("usable_now", 1 as Any), ("clears", [] as [String] as Any),
+        ] {
+            var invalid = grant
+            invalid[key] = value
+            check(parse([invalid])?.available == 0, "an invalid or inactive Claude grant (\(key): \(value)) must be skipped")
+        }
+        var gated = grant
+        gated["usable_now"] = false
+        let saved = parse([gated])
+        check(saved?.available == 1 && saved?.usableNow == 0, "a saved reset must stay visible when Claude temporarily prevents use")
+        var later = grant
+        later["id"] = "later-grant"
+        later["ends_at"] = "2026-10-23T16:00:00Z"
+        check(parse([later, grant])?.nextClaudeGrant?.id == grant["id"] as? String, "prefer the reset that expires first")
+        check(parse([gated, later])?.nextClaudeGrant?.id == "later-grant", "a blocked grant must not prevent spending another usable one")
+    }
+
+    private static func testClaudeResetRedemptionOutcomes() {
+        check(Fetcher.claudeRedemption(["result": "reset", "cleared": ["five_hour", "seven_day"]]) == .reset(windows: 2), "Claude success must report restored windows")
+        check(Fetcher.claudeRedemption(["result": "already_used"]) == .alreadyRedeemed, "an idempotent repeat must not claim a new reset")
+        check(Fetcher.claudeRedemption(["result": "not_limited"]) == .nothingToReset, "Claude must preserve an unnecessary reset")
+        for result in ["cooldown", "ineligible", "unavailable", "new-response"] {
+            if case .failed = Fetcher.claudeRedemption(["result": result]) {} else {
+                check(false, "Claude \(result) must never be reported as success")
+            }
+        }
     }
 
     private static func testCodexRedemptionOutcomes() {

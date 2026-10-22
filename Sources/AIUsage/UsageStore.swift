@@ -81,6 +81,7 @@ final class UsageStore: ObservableObject {
     private var polledTokenExpiry: [String: Double?] = [:]
     private var refreshTimer: Timer?
     private var refreshAfterConnectionChange = false
+    private var redeemingProviders = Set<String>()
     /// At most one process scan per launch, plus whenever Settings changes.
     private var remainingSessionClaudeScans = 1
     private var remainingSessionCodexScans = 1
@@ -221,11 +222,20 @@ final class UsageStore: ObservableObject {
 
     /// Spend one of a provider's reset credits, then re-read that provider so
     /// the cleared rows and the new credit count land straight away.
-    func redeemResetCredit(providerID: String) async -> Fetcher.ResetRedemption {
-        guard let entry = codexTargets.first(where: { $0.id == providerID }) else {
-            return .failed("this account no longer appears in Codex")
+    func redeemResetCredit(providerID: String, claudeGrantID: String? = nil) async -> Fetcher.ResetRedemption {
+        guard redeemingProviders.insert(providerID).inserted else {
+            return .failed("a reset is already in progress for this account")
         }
-        let outcome = await Fetcher.redeemCodexResetCredit(entry: entry)
+        defer { redeemingProviders.remove(providerID) }
+        let outcome: Fetcher.ResetRedemption
+        if let entry = claudeTargets.first(where: { $0.id == providerID }) {
+            guard let claudeGrantID else { return .failed("select a Claude reset first") }
+            outcome = await Fetcher.redeemClaudeResetCredit(entry: entry, grantID: claudeGrantID)
+        } else if let entry = codexTargets.first(where: { $0.id == providerID }) {
+            outcome = await Fetcher.redeemCodexResetCredit(entry: entry)
+        } else {
+            return .failed("this account is no longer connected")
+        }
         if isRefreshing {
             refreshAfterConnectionChange = true
         } else {

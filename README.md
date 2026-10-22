@@ -88,6 +88,11 @@ reading off the bottom of the screen.
 
 <img src="docs/screenshots/dropdown-usage.png" width="430" alt="The dropdown on the Usage tab: On target everywhere, with a row for each Claude and Codex window.">
 
+Claude and Codex accounts with saved usage resets show a small ↺ count beside
+the plan. Click it to see the details and confirm before using one. Claude
+resets include their expiry and the limits they restore; the weekly reset
+schedule stays the same. Expired resets disappear even between refreshes.
+
 **Desktop card.** The same reading, free-standing and roomier: a ring for the
 worst window, the summary line, and a block per provider with a word for how
 that provider on its own is doing. The whole card lights red from the inside

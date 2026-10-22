@@ -198,7 +198,7 @@ enum AgentServer {
         ]
         if let plan = provider.plan { entry["plan"] = plan }
         if let error = provider.error { entry["error"] = error }
-        if let credits = provider.resetCredits, credits.available > 0 {
+        if let credits = provider.resetCredits?.current(at: timing.now), credits.available > 0 {
             entry["reset_credits"] = ["available": credits.available, "usable_now": credits.usableNow]
         }
         if provider.stale {

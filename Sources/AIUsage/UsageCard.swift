@@ -336,71 +336,78 @@ struct ProviderBlock: View {
     var body: some View {
         let note = Pace.note(provider, timing: timing)
 
-        VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                BrandMark(provider: provider.kind, size: metrics.markSize)
-                    // Marks are centred on their own box, names sit on a
-                    // baseline; aligning the two by eye keeps the row level.
-                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - metrics.markSize * 0.14 }
+        let expiries = (provider.resetCredits?.claudeGrants ?? []).compactMap { grant in
+            grant.endsAt.map { Date(timeIntervalSince1970: Double($0)) }
+        }
+        let now = Date()
+        TimelineView(.explicit([now] + expiries.filter { $0 > now }.sorted())) { context in
+            let resetCredits = provider.resetCredits?.current(at: context.date)
+            VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    BrandMark(provider: provider.kind, size: metrics.markSize)
+                        // Marks are centred on their own box, names sit on a
+                        // baseline; aligning the two by eye keeps the row level.
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - metrics.markSize * 0.14 }
 
-                Text(provider.name)
-                    .font(.system(size: metrics.labelSize + 3, weight: .semibold))
-                    .foregroundStyle(.white)
+                    Text(provider.name)
+                        .font(.system(size: metrics.labelSize + 3, weight: .semibold))
+                        .foregroundStyle(.white)
 
-                if let plan = provider.plan, !plan.isEmpty {
-                    planBadge(plan)
-                }
+                    if let plan = provider.plan, !plan.isEmpty {
+                        planBadge(plan)
+                    }
 
-                if provider.stale {
-                    Text("stale")
-                        .font(.system(size: metrics.resetSize))
-                        .foregroundStyle(Glass.ink(0.5))
-                        .help(provider.measuredAt.map {
-                            "Last reading from \(Pace.clockLabel($0))"
-                        } ?? "Showing the last successful reading")
-                }
+                    if provider.stale {
+                        Text("stale")
+                            .font(.system(size: metrics.resetSize))
+                            .foregroundStyle(Glass.ink(0.5))
+                            .help(provider.measuredAt.map {
+                                "Last reading from \(Pace.clockLabel($0))"
+                            } ?? "Showing the last successful reading")
+                    }
 
-                if let credits = provider.resetCredits, credits.available > 0 {
-                    ResetCreditBadge(credits: credits, size: metrics.labelSize) {
-                        showsCredits.toggle()
+                    if let credits = resetCredits, credits.available > 0 {
+                        ResetCreditBadge(credits: credits, size: metrics.labelSize) {
+                            showsCredits.toggle()
+                        }
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if showsNote, let note {
+                        Text(note.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(note.color)
                     }
                 }
 
-                Spacer(minLength: 6)
-
-                if showsNote, let note {
-                    Text(note.text)
-                        .font(.system(size: 12))
-                        .foregroundStyle(note.color)
+                // Stays open after the last credit is spent, so the outcome is read.
+                if showsCredits, let credits = resetCredits {
+                    ResetCreditStrip(provider: provider, credits: credits, size: metrics.labelSize) {
+                        showsCredits = false
+                    }
+                    .padding(.leading, rowLeadingInset)
                 }
-            }
 
-            // Stays open after the last credit is spent, so the outcome is read.
-            if showsCredits, let credits = provider.resetCredits {
-                ResetCreditStrip(provider: provider, credits: credits, size: metrics.labelSize) {
-                    showsCredits = false
+                // Only providers with a reading reach here: one with nothing to
+                // draw is named once by `OutageNotice` instead of getting an empty
+                // block of its own. Carried rows are dimmed, so they cannot be
+                // mistaken for numbers just measured.
+                VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+                    ForEach(provider.windows) { window in
+                        UsageRow(
+                            window: window,
+                            metrics: metrics,
+                            mode: mode,
+                            timing: timing,
+                            showsCost: showsCost,
+                            isWorst: worstRow == Report.rowKey(provider: provider, window: window),
+                            dimmed: provider.stale
+                        )
+                    }
                 }
                 .padding(.leading, rowLeadingInset)
             }
-
-            // Only providers with a reading reach here: one with nothing to
-            // draw is named once by `OutageNotice` instead of getting an empty
-            // block of its own. Carried rows are dimmed, so they cannot be
-            // mistaken for numbers just measured.
-            VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
-                ForEach(provider.windows) { window in
-                    UsageRow(
-                        window: window,
-                        metrics: metrics,
-                        mode: mode,
-                        timing: timing,
-                        showsCost: showsCost,
-                        isWorst: worstRow == Report.rowKey(provider: provider, window: window),
-                        dimmed: provider.stale
-                    )
-                }
-            }
-            .padding(.leading, rowLeadingInset)
         }
     }
 
@@ -467,6 +474,7 @@ struct ResetCreditStrip: View {
 
     @EnvironmentObject private var store: UsageStore
     @State private var stage = Stage.idle
+    @State private var confirmedGrant: ClaudeResetGrant?
 
     private enum Stage: Equatable {
         case idle
@@ -478,23 +486,50 @@ struct ResetCreditStrip: View {
     var body: some View {
         let count = credits.available == 1 ? "1 reset" : "\(credits.available) resets"
         let usable = credits.usableNow > 0 && !provider.stale
+        let confirmedUsable = usable && (confirmedGrant.map { selected in
+            credits.claudeGrants?.contains(where: { $0.id == selected.id && $0.usable }) == true
+        } ?? (provider.kind != "claude"))
 
         VStack(alignment: .leading, spacing: 8) {
             switch stage {
             case .idle:
-                text(usable
-                    ? "\(count) available. Using one clears this account's limits right away."
-                    : "\(count) saved. Nothing needs resetting yet — use one when you hit a limit, here or with /usage in Codex.")
+                if provider.kind == "claude" {
+                    text(credits.available == 0 ? "No resets available right now." : "\(count) available.")
+                    if let grant = credits.nextClaudeGrant {
+                        text(grant.scopeDescription)
+                        if let expiry = grant.expiryDescription { text(expiry) }
+                    }
+                    if provider.stale {
+                        text("Refresh usage before using a reset.")
+                    } else if !usable && credits.available > 0 {
+                        text("Claude isn't allowing this reset right now. Check Settings → Usage in Claude.")
+                    }
+                } else {
+                    text(usable
+                        ? "\(count) available. Using one clears this account's limits right away."
+                        : "\(count) saved. Nothing needs resetting yet — use one when you hit a limit, here or with /usage in Codex.")
+                }
                 HStack(spacing: 8) {
-                    GlassButton(label: "Use a reset…", enabled: usable) { stage = .confirming }
+                    GlassButton(label: "Use a reset…", enabled: usable) {
+                        confirmedGrant = credits.nextClaudeGrant
+                        stage = .confirming
+                    }
                     GlassLink(title: "Close", action: close)
                 }
             case .confirming:
-                text(credits.available == 1
-                    ? "Use your only reset on \(provider.name) now? This cannot be undone."
-                    : "Use one reset on \(provider.name) now? \(credits.available - 1) will remain. This cannot be undone.")
+                if let grant = confirmedGrant {
+                    text(grant.scopeDescription)
+                    if let expiry = grant.expiryDescription { text(expiry) }
+                }
+                if confirmedUsable {
+                    text(credits.available == 1
+                        ? "Use your only reset on \(provider.name) now? This cannot be undone."
+                        : "Use one reset on \(provider.name) now? \(credits.available - 1) will remain. This cannot be undone.")
+                } else {
+                    text("This reset is no longer usable. Cancel and refresh usage to check availability.")
+                }
                 HStack(spacing: 8) {
-                    GlassButton(label: "Use reset", prominent: true) { redeem() }
+                    GlassButton(label: "Use reset", prominent: true, enabled: confirmedUsable) { redeem() }
                     GlassLink(title: "Cancel") { stage = .idle }
                 }
             case .redeeming:
@@ -531,7 +566,7 @@ struct ResetCreditStrip: View {
     private func redeem() {
         stage = .redeeming
         Task {
-            let outcome = await store.redeemResetCredit(providerID: provider.id)
+            let outcome = await store.redeemResetCredit(providerID: provider.id, claudeGrantID: confirmedGrant?.id)
             stage = .done(outcome.message)
         }
     }
