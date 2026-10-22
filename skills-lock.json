@@ -107,7 +107,7 @@
       "source": "gnibu/bento",
       "sourceType": "github",
       "skillPath": "plugins/bento/skills/bento-setup/SKILL.md",
-      "computedHash": "48fa1a32d9f78922de541eeebfeeacf2432edd580d7686a9eff71f644fb44d9a"
+      "computedHash": "c2a8e75e0e15bbfb472448b5511ce3df1555145bfebc24569885ce1fcbbf2b4d"
     },
     "bento-ship": {
       "source": "gnibu/bento",

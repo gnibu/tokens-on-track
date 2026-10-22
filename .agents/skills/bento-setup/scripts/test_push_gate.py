@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,18 @@ from pathlib import Path
 from push_gate import FIX_SUBJECT, MESSAGE, gated_dirs, hook_command, install, reviewed, uninstall
 
 SCRIPT = Path(__file__).resolve().parent / "push_gate.py"
+OLDEST = (3, 9)  # the macOS system python3
+
+
+def oldest_python():
+    """An interpreter of the oldest supported version, or None."""
+    for exe in (shutil.which(f"python{OLDEST[0]}.{OLDEST[1]}"), "/usr/bin/python3"):
+        if exe and Path(exe).exists():
+            version = subprocess.run([exe, "-c", "import sys; print(*sys.version_info[:2])"],
+                                     capture_output=True, text=True).stdout.split()
+            if tuple(map(int, version)) == OLDEST:
+                return exe
+    return None
 
 
 def git(repo, *args):
@@ -79,6 +92,14 @@ class ReviewedTest(unittest.TestCase):
         run = subprocess.run([sys.executable, str(SCRIPT)], input=event, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0)
 
+    def test_hook_blocks_under_the_oldest_python(self):
+        exe = oldest_python()
+        if not exe:
+            self.skipTest(f"no Python {OLDEST[0]}.{OLDEST[1]} found")
+        event = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push"}, "cwd": str(self.repo)})
+        run = subprocess.run([exe, str(SCRIPT)], input=event, capture_output=True, text=True)
+        self.assertEqual((run.returncode, run.stderr.strip()), (2, MESSAGE))
+
 
 class InstallTest(unittest.TestCase):
     def test_idempotent_and_keeps_other_hooks(self):
@@ -104,6 +125,14 @@ class InstallTest(unittest.TestCase):
         run = subprocess.run(["bash", "-c", command], input="{}", capture_output=True, text=True)
         self.assertEqual(run.returncode, 1)
         self.assertIn("rerun bento-setup", run.stderr)
+
+    def test_crashing_script_blocks(self):
+        boom = Path(tempfile.mkdtemp()) / "boom.py"
+        boom.write_text("raise TypeError('old python')\n")
+        command = f"f={boom}; " + hook_command().split("; ", 1)[1]
+        run = subprocess.run(["bash", "-c", command], input="{}", capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("gate failed (exit 1), blocking", run.stderr)
 
 
 if __name__ == "__main__":

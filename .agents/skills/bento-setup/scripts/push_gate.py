@@ -13,6 +13,8 @@ Usage:
   push_gate.py install <hooks.json>    (Claude settings.json or Codex hooks.json)
   push_gate.py uninstall <hooks.json>
 """
+from __future__ import annotations  # `str | None` hints on Python 3.9, the macOS system python3
+
 import json
 import os
 import re
@@ -169,8 +171,12 @@ def hook_command() -> str:
     else:
         path = shlex.quote(str(script))
     # A missing script must not block every shell command (python3 exits 2 on a file it can't
-    # open, which means block): fail with a visible, non-blocking error instead.
-    return (f'f={path}; if [ -f "$f" ]; then python3 "$f"; else '
+    # open, which means block): fail with a visible, non-blocking error instead. A script that
+    # crashes (exit 1, e.g. an old python3) must not let pushes through: block (fail closed).
+    return (f'f={path}; if [ -f "$f" ]; then python3 "$f"; rc=$?; '
+            'if [ $rc -eq 0 ] || [ $rc -eq 2 ]; then exit $rc; fi; '
+            'echo "bento: pre-PR review gate failed (exit $rc), blocking; fix it or rerun bento-setup" >&2; '
+            'exit 2; else '
             'echo "bento: pre-PR review gate missing at $f; rerun bento-setup" >&2; exit 1; fi')
 
 
