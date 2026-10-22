@@ -83,6 +83,20 @@ struct ResetCredits: Codable, Equatable {
         }.first
     }
 
+    /// When the soonest-expiring saved reset lapses, if any grant has an end.
+    var nextExpiry: Date? {
+        claudeGrants?.compactMap(\.endsAt).min().map { Date(timeIntervalSince1970: Double($0)) }
+    }
+
+    /// Short label beside the coin: the clock time within a day of expiry, the date otherwise.
+    func expiryLabel(at now: Date = Date()) -> String? {
+        guard let expiry = nextExpiry else { return nil }
+        let close = expiry.timeIntervalSince(now) < 24 * 3600
+        return "exp: " + (close
+            ? expiry.formatted(date: .omitted, time: .shortened)
+            : expiry.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year(.twoDigits)))
+    }
+
     enum CodingKeys: String, CodingKey {
         case available
         case usableNow = "usable_now"
