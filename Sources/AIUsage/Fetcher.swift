@@ -1,12 +1,15 @@
 import Darwin
 import Foundation
+import CoreFoundation
 
 /// Reads provider credentials already stored on this Mac, plus keys the user
 /// explicitly saved in the app's Keychain items. Nothing is written back to a
 /// provider-owned store and no token is ever logged.
 enum Fetcher {
     static let keychainService = "Claude Code-credentials"
-    static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1")!
+    static let claudeProfileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
+    static let claudeUserAgent = "claude-cli/2.1.308 (external, cli)"
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
     static let codexResetConsumeURL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume")!
     static let openCodeGoUsageURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
@@ -190,11 +193,7 @@ enum Fetcher {
 
         let data: [String: Any]
         do {
-            data = try await getJSONRetrying(claudeUsageURL, headers: [
-                "Authorization": "Bearer \(oauth.accessToken)",
-                "anthropic-beta": "oauth-2025-04-20",
-                "Accept": "application/json",
-            ])
+            data = try await getJSONRetrying(claudeUsageURL, headers: claudeHeaders(oauth.accessToken))
         } catch let error as HTTPStatus {
             provider.error = claudeNote(for: error.code, profilePath: entry.normalizedPath)
             provider.staleToken = error.code == 401
@@ -206,9 +205,102 @@ enum Fetcher {
         }
 
         provider.windows = claudeWindows(data)
+        provider.resetCredits = claudeResetCredits(data["cedar_ember"])
         provider.ok = !provider.windows.isEmpty
         if !provider.ok { provider.error = "no limit data" }
         return provider
+    }
+
+    private static func claudeHeaders(_ token: String) -> [String: String] {
+        ["Authorization": "Bearer \(token)", "anthropic-beta": "oauth-2025-04-20",
+         "User-Agent": claudeUserAgent, "Accept": "application/json"]
+    }
+
+    /// The optional block comes from the same account response as the windows.
+    /// Expired, future, paused and malformed grants never become spendable.
+    static func claudeResetCredits(_ raw: Any?, now: Date = Date()) -> ResetCredits? {
+        guard let block = raw as? [String: Any],
+              let eligible = jsonBool(block["eligible"]),
+              let records = block["grants"] as? [[String: Any]], records.count <= 200
+        else { return nil }
+        guard eligible else { return ResetCredits(available: 0, usableNow: 0, claudeGrants: []) }
+        var seen = Set<String>()
+        let grants = records.compactMap { record -> ClaudeResetGrant? in
+            guard let id = record["id"] as? String,
+                  !id.isEmpty, id.count <= 200,
+                  id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil,
+                  seen.insert(id).inserted,
+                  let remaining = jsonCount(record["resets_left"]),
+                  let total = jsonCount(record["resets_total"]), remaining <= total,
+                  let paused = jsonBool(record["paused"]), !paused,
+                  let usable = jsonBool(record["usable_now"]),
+                  let clears = record["clears"] as? [String], !clears.isEmpty
+            else { return nil }
+            func timestamp(_ key: String) -> Int? {
+                epoch(fromISO: record[key] as? String)
+            }
+            for key in ["starts_at", "ends_at"] {
+                if let value = record[key], !(value is NSNull), timestamp(key) == nil { return nil }
+            }
+            let grant = ClaudeResetGrant(id: id, remaining: remaining, usable: usable,
+                startsAt: timestamp("starts_at"), endsAt: timestamp("ends_at"), clears: clears)
+            return grant.isActive(at: now) ? grant : nil
+        }
+        let credits = ResetCredits(available: 0, usableNow: 0, claudeGrants: grants).current(at: now)
+        return credits.available <= 50 ? credits : nil
+    }
+
+    private static func jsonBool(_ raw: Any?) -> Bool? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    private static func jsonCount(_ raw: Any?) -> Int? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite, (0...50).contains(number.doubleValue),
+              number.doubleValue.rounded() == number.doubleValue else { return nil }
+        return number.intValue
+    }
+
+    /// Re-read the grant before spending it, using this profile's same bearer
+    /// for usage, organization lookup and redemption. Never choose a different
+    /// grant from the one the user confirmed. Retries reuse the request UUID.
+    static func redeemClaudeResetCredit(entry: ClaudeProfile.Entry, grantID: String) async -> ResetRedemption {
+        guard let blob = keychainSecret(service: entry.keychainService),
+              let oauth = ClaudeProfile.parseOAuth(from: blob)
+        else { return .failed("Claude login not readable") }
+        var headers = claudeHeaders(oauth.accessToken)
+        do {
+            let usage = try await getJSONRetrying(claudeUsageURL, headers: headers)
+            guard let grant = claudeResetCredits(usage["cedar_ember"])?.claudeGrants?
+                .first(where: { $0.id == grantID && $0.usable })
+            else { return .failed("this Claude reset is no longer usable; refresh and try again") }
+            let profile = try await getJSONRetrying(claudeProfileURL, headers: headers)
+            guard let organization = profile["organization"] as? [String: Any],
+                  let id = organization["uuid"] as? String, UUID(uuidString: id) != nil
+            else { return .failed("Claude organization unavailable") }
+            let url = URL(string: "https://api.anthropic.com/api/organizations/\(id)/reset_rate_limits")!
+            headers["Content-Type"] = "application/json"
+            let response = try await requestJSONRetrying(url, method: "POST", headers: headers,
+                body: ["program": "cedar_ember", "grant_id": grant.id,
+                       "request_id": UUID().uuidString.lowercased()])
+            return claudeRedemption(response)
+        } catch let error as HTTPStatus {
+            return .failed(error.code == 401 ? "token expired, run Claude Code once" : "HTTP \(error.code)")
+        } catch {
+            return .failed(String(error.localizedDescription.prefix(60)))
+        }
+    }
+
+    static func claudeRedemption(_ response: [String: Any]) -> ResetRedemption {
+        switch response["result"] as? String {
+        case "reset": return .reset(windows: (response["cleared"] as? [String])?.count ?? 0)
+        case "already_used": return .alreadyRedeemed
+        case "not_limited": return .nothingToReset
+        case "cooldown": return .failed("Claude asks you to wait before using another reset")
+        case "ineligible", "unavailable": return .failed("this reset is unavailable; check Claude Settings → Usage")
+        default: return .failed("unexpected answer from Claude; refresh before trying again")
+        }
     }
 
     static func claudeNote(for code: Int, profilePath: String) -> String {
@@ -461,7 +553,7 @@ enum Fetcher {
         var message: String {
             switch self {
             case .reset:
-                return "One reset used — your limits are back to 0%."
+                return "Reset used — eligible limits have been restored."
             case .nothingToReset: return "Nothing to reset right now; the credit was kept."
             case .noCredit: return "No reset credit left on this account."
             case .alreadyRedeemed: return "That reset was already used."

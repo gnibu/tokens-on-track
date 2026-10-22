@@ -59,17 +59,67 @@ struct UsageWindow: Codable, Identifiable, Equatable {
     }
 }
 
-/// Free "full reset" credits a provider has granted the account. Only Codex
-/// reports them today. `usableNow` is the provider's own count of credits that
-/// would actually restore something right now; at zero a redeem is refused
-/// with "nothing to reset" rather than spent.
+/// Saved usage resets. Claude grants carry their scope and expiry; Codex
+/// supplies only aggregate counts.
 struct ResetCredits: Codable, Equatable {
     var available: Int
     var usableNow: Int
+    var claudeGrants: [ClaudeResetGrant]? = nil
+
+    func current(at date: Date = Date()) -> ResetCredits {
+        guard let claudeGrants else { return self }
+        let active = claudeGrants.filter { $0.isActive(at: date) }
+        return ResetCredits(
+            available: active.reduce(0) { $0 + $1.remaining },
+            usableNow: active.filter(\.usable).reduce(0) { $0 + $1.remaining },
+            claudeGrants: active
+        )
+    }
+
+    var nextClaudeGrant: ClaudeResetGrant? {
+        claudeGrants?.sorted {
+            if $0.usable != $1.usable { return $0.usable }
+            return ($0.endsAt ?? Int.max) < ($1.endsAt ?? Int.max)
+        }.first
+    }
 
     enum CodingKeys: String, CodingKey {
         case available
         case usableNow = "usable_now"
+        case claudeGrants = "claude_grants"
+    }
+}
+
+struct ClaudeResetGrant: Codable, Equatable, Identifiable {
+    var id: String
+    var remaining: Int
+    var usable: Bool
+    var startsAt: Int?
+    var endsAt: Int?
+    var clears: [String]
+
+    func isActive(at date: Date) -> Bool {
+        let now = Int(date.timeIntervalSince1970)
+        return remaining > 0 && (startsAt.map { $0 <= now } ?? true)
+            && (endsAt.map { now < $0 } ?? true)
+    }
+
+    var scopeDescription: String {
+        let names = clears.map { key -> String in
+            switch key {
+            case "five_hour": return "5-hour"
+            case "seven_day": return "weekly"
+            case "seven_day_overage_included": return "Fable weekly"
+            default: return key.replacingOccurrences(of: "_", with: " ")
+            }
+        }
+        return "Restores \(names.joined(separator: ", ")) limits. Your weekly reset time stays the same."
+    }
+
+    var expiryDescription: String? {
+        endsAt.map {
+            "Expires \(Date(timeIntervalSince1970: Double($0)).formatted(date: .abbreviated, time: .shortened))."
+        }
     }
 }
 
