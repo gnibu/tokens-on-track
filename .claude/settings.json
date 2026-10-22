@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/.agents/skills/bento-setup/scripts/push_gate.py\"; if [ -f \"$f\" ]; then python3 \"$f\"; else echo \"bento: pre-PR review gate missing at $f; rerun bento-setup\" >&2; exit 1; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
