@@ -2297,6 +2297,9 @@ enum RegressionTests {
         check(credits.nextClaudeGrant?.scopeDescription.contains("weekly reset time stays the same") == true, "Claude confirmation must preserve the weekly schedule")
         let decoded = try? JSONDecoder().decode(ResetCredits.self, from: JSONEncoder().encode(credits))
         check(decoded == credits, "Claude grant metadata must survive caching")
+        check(credits.expiryLabel(at: date) == "exp: " + credits.nextExpiry!.formatted(date: .omitted, time: .shortened), "an expiry within a day must show the time")
+        check(credits.expiryLabel(at: date.addingTimeInterval(-3 * 86400)) == "exp: " + credits.nextExpiry!.formatted(.dateTime.day(.twoDigits).month(.twoDigits).year(.twoDigits)), "a distant expiry must show the date, not the time")
+        check(ResetCredits(available: 2, usableNow: 0).expiryLabel() == nil, "Codex counts carry no expiry to show")
         check(decoded?.current(at: date.addingTimeInterval(3600)).available == 0, "a cached reset must disappear at its exact expiry without a network poll")
         var provider = Provider(id: "Claude Code-credentials", kind: "claude", name: "Claude")
         provider.ok = true

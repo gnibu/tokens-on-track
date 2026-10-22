@@ -13,6 +13,8 @@ published with generated notes on the
 - Claude saved usage resets beside the plan badge, including the restored
   limits, expiry, and confirmation before redemption. Expired and paused
   grants are excluded; availability is checked again before spending one.
+  The coin shows the soonest expiry (`exp: 22/10/26`), or the time
+  (`exp: 14:22`) once it is less than a day away.
 - Codex usage-reset credits: a small ↺ coin with the count sits beside the
   plan badge. Clicking it explains when a reset helps and, once Codex says a
   reset would clear something, spends one after a confirmation.

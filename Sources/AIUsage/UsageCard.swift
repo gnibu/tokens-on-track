@@ -340,7 +340,9 @@ struct ProviderBlock: View {
             grant.endsAt.map { Date(timeIntervalSince1970: Double($0)) }
         }
         let now = Date()
-        TimelineView(.explicit([now] + expiries.filter { $0 > now }.sorted())) { context in
+        // Also tick a day before each expiry, when the badge switches from date to time.
+        let ticks = expiries.flatMap { [$0.addingTimeInterval(-24 * 3600), $0] }.filter { $0 > now }.sorted()
+        TimelineView(.explicit([now] + ticks)) { context in
             let resetCredits = provider.resetCredits?.current(at: context.date)
             VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
@@ -367,7 +369,7 @@ struct ProviderBlock: View {
                     }
 
                     if let credits = resetCredits, credits.available > 0 {
-                        ResetCreditBadge(credits: credits, size: metrics.labelSize) {
+                        ResetCreditBadge(credits: credits, expiry: credits.expiryLabel(at: context.date), size: metrics.labelSize) {
                             showsCredits.toggle()
                         }
                     }
@@ -436,6 +438,7 @@ struct ProviderBlock: View {
 /// Quiet on purpose: they matter on the day a limit is hit, not every glance.
 struct ResetCreditBadge: View {
     let credits: ResetCredits
+    let expiry: String?
     let size: CGFloat
     let action: () -> Void
 
@@ -453,6 +456,13 @@ struct ResetCreditBadge: View {
                     .font(.system(size: size - 2, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(Glass.ink(hovering ? 0.9 : 0.6))
+                if let expiry {
+                    Text(expiry)
+                        .font(.system(size: size - 3))
+                        .monospacedDigit()
+                        .foregroundStyle(Glass.ink(hovering ? 0.7 : 0.45))
+                        .padding(.leading, 2)
+                }
             }
             .contentShape(Rectangle())
         }
