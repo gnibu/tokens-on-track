@@ -208,7 +208,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 | Codex | One `auth.json` per Codex profile (`~/.codex`, or another `CODEX_HOME` folder) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenCode Go | app Keychain item, active OpenCode account, `OPENCODE_GO_API_KEY` / `OPENCODE_API_KEY`, or a running Conductor OpenCode process | `GET opencode.ai/zen/go/v1/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
-| Cursor | signed-in Cursor app session, app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, or a running Conductor Cursor process | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
+| Cursor | app Keychain item, `CURSOR_API_KEY` / `CURSOR_SESSION_TOKEN`, signed-in Cursor app session, or a running Conductor Cursor process; then, only if none worked, the Cursor app's or Conductor's Keychain item | `GET cursor.com/api/usage-summary` or `POST api.cursor.com/teams/spend` |
 
 The Claude and Codex endpoints are the same first-party endpoints the CLIs
 themselves call, and both are **undocumented internal APIs**. They can change
@@ -265,10 +265,15 @@ Worth understanding before running something that touches your API credentials.
   `auth.json`.
 - Reads the Claude OAuth token via `/usr/bin/security`, the Codex token from
   each selected profile's `auth.json`, an OpenCode Go key from OpenCode's active
-  account, a Cursor session from the Cursor app's Keychain item
-  `cursor-access-token` or `state.vscdb`, and an OpenRouter or Cursor key from
-  the first available configured source. A key entered in Settings is stored in
-  the app's own Keychain item.
+  account, a Cursor session from `state.vscdb`, and an OpenRouter or Cursor key
+  from the first available configured source. A key entered in Settings is
+  stored in the app's own Keychain item.
+- Another app's Keychain item — the Cursor app's `cursor-access-token`, or
+  Conductor's saved `CURSOR_API_KEY` in `com.conductor.app.production.settings`
+  — is read only when no other Cursor source works. macOS names the reader
+  `security` in that prompt. Clicking **Deny** on any Keychain prompt is
+  remembered, even after a relaunch; **Settings → Keychain → Ask again** lets
+  macOS ask once more.
 - Conductor's OpenCode Go, OpenRouter, or Cursor key is available only inside its managed
   process. While that process is running, the app can read its same-user process
   environment as a best-effort fallback; it never copies that key into storage.
