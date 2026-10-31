@@ -14,6 +14,7 @@ enum RegressionTests {
         testProcessOutputIsReturned()
         testProcessIsTerminatedAtTimeout()
         testKeychainDenialIsRecognised()
+        testKeychainDenialIsRemembered()
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
@@ -177,6 +178,41 @@ enum RegressionTests {
         check(Fetcher.isKeychainDenial(128), "cancelled keychain prompt must be remembered")
         check(!Fetcher.isKeychainDenial(44), "a missing keychain item is not a refusal")
         check(!Fetcher.isKeychainDenial(0), "a granted keychain item is not a refusal")
+    }
+
+    /// A stand-in for `security` that answers Deny and counts its runs, so the
+    /// test proves a refused item is not asked for again until Ask again.
+    private static func testKeychainDenialIsRemembered() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tot-keychain-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("security")
+        let runs = dir.appendingPathComponent("runs")
+        let script = "#!/bin/sh\necho run >> '\(runs.path)'\nexit 51\n"
+        FileManager.default.createFile(
+            atPath: fake.path,
+            contents: Data(script.utf8),
+            attributes: [.posixPermissions: 0o755]
+        )
+        func runCount() -> Int {
+            ((try? String(contentsOf: runs, encoding: .utf8)) ?? "")
+                .split(separator: "\n").count
+        }
+
+        Fetcher.forgetKeychainDenials()
+        defer { Fetcher.forgetKeychainDenials() }
+        check(Fetcher.keychainSecret(service: "tot-test", security: fake) == nil, "denied item returns nil")
+        check(Fetcher.hasKeychainDenials, "a Deny must be recorded")
+        _ = Fetcher.keychainSecret(service: "tot-test", security: fake)
+        check(runCount() == 1, "a denied item must not prompt again")
+        check(
+            UserDefaults.standard.stringArray(forKey: "deniedKeychainItems")?.isEmpty == false,
+            "a Deny must survive a relaunch"
+        )
+        Fetcher.forgetKeychainDenials()
+        _ = Fetcher.keychainSecret(service: "tot-test", security: fake)
+        check(runCount() == 2, "Ask again must let macOS prompt once more")
     }
 
     // ----------------------------------------------------------------- //

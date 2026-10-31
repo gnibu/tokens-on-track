@@ -1323,14 +1323,18 @@ enum Fetcher {
     /// Shelled out rather than done through SecItemCopyMatching, which keeps
     /// the app out of the keychain-entitlement business and reuses the consent
     /// the item's ACL already grants `security`. macOS asks the first time.
-    private static func keychainSecret(service: String, account: String? = nil) -> Data? {
+    static func keychainSecret(
+        service: String,
+        account: String? = nil,
+        security: URL = URL(fileURLWithPath: "/usr/bin/security")
+    ) -> Data? {
         let item = "\(service)|\(account ?? "")"
         if deniedKeychainItems.withLock({ $0.contains(item) }) { return nil }
         var arguments = ["find-generic-password", "-s", service]
         if let account { arguments += ["-a", account] }
         arguments.append("-w")
         guard let result = runProcessStatus(
-            executableURL: URL(fileURLWithPath: "/usr/bin/security"),
+            executableURL: security,
             arguments: arguments,
             timeout: 15
         ) else { return nil }
