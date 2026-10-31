@@ -22,6 +22,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
     @Published private(set) var hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
     @Published private(set) var hasSavedCursorKey = CursorKeychain.read() != nil
+    @Published private(set) var hasKeychainDenials = Fetcher.hasKeychainDenials
     @Published private(set) var statusImage: NSImage = StatusIcon.image(segments: [])
     /// Spells out both readings for whatever the item is drawn as, since the
     /// icon has room for one number and no room at all to label it.
@@ -383,6 +384,7 @@ final class UsageStore: ObservableObject {
             cursorMonthlyBudget: preferences.cursorMonthlyBudget
         )
         let merged = merging(fetched, full: full, at: Date(), allIDs: allIDs)
+        hasKeychainDenials = Fetcher.hasKeychainDenials
         Preferences.shared.rememberModelLimits(merged.scopedModelLimits)
         report = merged
         // Remember the expiry of any token just rejected, so the next wake can
@@ -490,6 +492,13 @@ final class UsageStore: ObservableObject {
         hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
         if removed { await refresh() }
         return removed
+    }
+
+    /// Settings → Keychain → Ask again: let macOS prompt for refused items once more.
+    func retryKeychainAccess() {
+        Fetcher.forgetKeychainDenials()
+        hasKeychainDenials = false
+        connectionsChanged()
     }
 
     @discardableResult

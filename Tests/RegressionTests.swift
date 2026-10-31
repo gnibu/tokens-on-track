@@ -13,6 +13,9 @@ enum RegressionTests {
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()
         testProcessIsTerminatedAtTimeout()
+        testKeychainDenialIsRecognised()
+        testKeychainDenialIsRemembered()
+        testGrantedKeychainSecretIsKept()
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
@@ -160,6 +163,90 @@ enum RegressionTests {
             Date().timeIntervalSince(startedAt) < 2,
             "timed-out helper process must be terminated promptly"
         )
+    }
+
+    private static func testKeychainDenialIsRecognised() {
+        let denied = Fetcher.runProcessStatus(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 51"],
+            timeout: 1
+        )
+        check(denied?.status == 51, "helper process exit status must be kept")
+        check(
+            denied.map { Fetcher.isKeychainDenial($0.status) } == true,
+            "Deny on a keychain prompt must be remembered"
+        )
+        check(Fetcher.isKeychainDenial(128), "cancelled keychain prompt must be remembered")
+        check(!Fetcher.isKeychainDenial(44), "a missing keychain item is not a refusal")
+        check(!Fetcher.isKeychainDenial(0), "a granted keychain item is not a refusal")
+    }
+
+    /// A stand-in for `security` that answers Deny and counts its runs, so the
+    /// test proves a refused item is not asked for again until Ask again.
+    private static func testKeychainDenialIsRemembered() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tot-keychain-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("security")
+        let runs = dir.appendingPathComponent("runs")
+        let script = "#!/bin/sh\necho run >> '\(runs.path)'\nexit 51\n"
+        FileManager.default.createFile(
+            atPath: fake.path,
+            contents: Data(script.utf8),
+            attributes: [.posixPermissions: 0o755]
+        )
+        func runCount() -> Int {
+            ((try? String(contentsOf: runs, encoding: .utf8)) ?? "")
+                .split(separator: "\n").count
+        }
+
+        Fetcher.forgetKeychainDenials()
+        defer { Fetcher.forgetKeychainDenials() }
+        check(Fetcher.keychainSecret(service: "tot-test", security: fake) == nil, "denied item returns nil")
+        check(Fetcher.hasKeychainDenials, "a Deny must be recorded")
+        _ = Fetcher.keychainSecret(service: "tot-test", security: fake)
+        check(runCount() == 1, "a denied item must not prompt again")
+        check(
+            UserDefaults.standard.stringArray(forKey: "deniedKeychainItems")?.isEmpty == false,
+            "a Deny must survive a relaunch"
+        )
+        Fetcher.forgetKeychainDenials()
+        _ = Fetcher.keychainSecret(service: "tot-test", security: fake)
+        check(runCount() == 2, "Ask again must let macOS prompt once more")
+    }
+
+    /// A one-time Allow hands the secret over once; polls reuse it until Cursor
+    /// calls it stale, and only then is the item read (and prompted) again.
+    private static func testGrantedKeychainSecretIsKept() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tot-granted-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("security")
+        let runs = dir.appendingPathComponent("runs")
+        let script = "#!/bin/sh\necho run >> '\(runs.path)'\necho tot-secret\n"
+        FileManager.default.createFile(
+            atPath: fake.path,
+            contents: Data(script.utf8),
+            attributes: [.posixPermissions: 0o755]
+        )
+        func runCount() -> Int {
+            ((try? String(contentsOf: runs, encoding: .utf8)) ?? "")
+                .split(separator: "\n").count
+        }
+
+        let service = "tot-granted-\(UUID().uuidString)"
+        check(
+            Fetcher.grantedKeychainSecret(service: service, security: fake) == "tot-secret",
+            "granted secret is returned trimmed"
+        )
+        _ = Fetcher.grantedKeychainSecret(service: service, security: fake)
+        check(runCount() == 1, "a granted secret must not be read (and prompted) again")
+        Fetcher.forgetGrantedKeychainSecret("tot-secret")
+        _ = Fetcher.grantedKeychainSecret(service: service, security: fake)
+        check(runCount() == 2, "a stale secret must be read from its item again")
+        Fetcher.forgetGrantedKeychainSecret("tot-secret")
     }
 
     // ----------------------------------------------------------------- //
