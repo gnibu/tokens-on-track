@@ -919,6 +919,7 @@ enum Fetcher {
                 }
                 if let session = candidate.session {
                     let result = await fetchCursorSession(session, source: candidate.source)
+                    if result.provider.staleToken { forgetGrantedKeychainSecret(candidate.secret) }
                     if result.skipToNext {
                         lastError = result.provider.error ?? lastError
                         if result.provider.ok { fallback = result.provider }
@@ -1083,8 +1084,7 @@ enum Fetcher {
         #if APP_STORE
         return []
         #else
-        return keychainSecret(service: CursorCredential.accessTokenService)
-            .flatMap { String(data: $0, encoding: .utf8) }
+        return grantedKeychainSecret(service: CursorCredential.accessTokenService)
             .map { [.init(secret: $0, source: .cursorApp, authoritative: false)] } ?? []
         #endif
     }
@@ -1093,14 +1093,36 @@ enum Fetcher {
         #if APP_STORE
         return []
         #else
-        guard let key = keychainSecret(
+        return grantedKeychainSecret(
             service: CursorCredential.conductorSettingsService,
             account: CursorCredential.conductorAPIKeyAccount
-        ).flatMap({ String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }),
-              !key.isEmpty
-        else { return [] }
-        return [.init(secret: key, source: .conductor, authoritative: false)]
+        ).map { [.init(secret: $0, source: .conductor, authoritative: false)] } ?? []
         #endif
+    }
+
+    /// Secrets macOS handed over from another app's Keychain item, kept for the
+    /// launch so a one-time Allow is not asked for again on every poll. Not for
+    /// Claude: Claude Code rotates its token in place.
+    private static let grantedKeychainSecrets = OSAllocatedUnfairLock(initialState: [String: String]())
+
+    static func grantedKeychainSecret(
+        service: String,
+        account: String? = nil,
+        security: URL = URL(fileURLWithPath: "/usr/bin/security")
+    ) -> String? {
+        let item = "\(service)|\(account ?? "")"
+        if let secret = grantedKeychainSecrets.withLock({ $0[item] }) { return secret }
+        guard let secret = keychainSecret(service: service, account: account, security: security)
+            .flatMap({ String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }),
+              !secret.isEmpty
+        else { return nil }
+        grantedKeychainSecrets.withLock { $0[item] = secret }
+        return secret
+    }
+
+    /// A kept secret Cursor called stale is read from its item again next time.
+    static func forgetGrantedKeychainSecret(_ secret: String) {
+        grantedKeychainSecrets.withLock { $0 = $0.filter { $0.value != secret } }
     }
 
     private static func codexAuthData(entry: CodexProfile.Entry) -> Data? {

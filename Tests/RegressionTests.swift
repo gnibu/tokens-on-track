@@ -15,6 +15,7 @@ enum RegressionTests {
         testProcessIsTerminatedAtTimeout()
         testKeychainDenialIsRecognised()
         testKeychainDenialIsRemembered()
+        testGrantedKeychainSecretIsKept()
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
@@ -213,6 +214,39 @@ enum RegressionTests {
         Fetcher.forgetKeychainDenials()
         _ = Fetcher.keychainSecret(service: "tot-test", security: fake)
         check(runCount() == 2, "Ask again must let macOS prompt once more")
+    }
+
+    /// A one-time Allow hands the secret over once; polls reuse it until Cursor
+    /// calls it stale, and only then is the item read (and prompted) again.
+    private static func testGrantedKeychainSecretIsKept() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tot-granted-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("security")
+        let runs = dir.appendingPathComponent("runs")
+        let script = "#!/bin/sh\necho run >> '\(runs.path)'\necho tot-secret\n"
+        FileManager.default.createFile(
+            atPath: fake.path,
+            contents: Data(script.utf8),
+            attributes: [.posixPermissions: 0o755]
+        )
+        func runCount() -> Int {
+            ((try? String(contentsOf: runs, encoding: .utf8)) ?? "")
+                .split(separator: "\n").count
+        }
+
+        let service = "tot-granted-\(UUID().uuidString)"
+        check(
+            Fetcher.grantedKeychainSecret(service: service, security: fake) == "tot-secret",
+            "granted secret is returned trimmed"
+        )
+        _ = Fetcher.grantedKeychainSecret(service: service, security: fake)
+        check(runCount() == 1, "a granted secret must not be read (and prompted) again")
+        Fetcher.forgetGrantedKeychainSecret("tot-secret")
+        _ = Fetcher.grantedKeychainSecret(service: service, security: fake)
+        check(runCount() == 2, "a stale secret must be read from its item again")
+        Fetcher.forgetGrantedKeychainSecret("tot-secret")
     }
 
     // ----------------------------------------------------------------- //

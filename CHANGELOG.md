@@ -68,7 +68,9 @@ published with generated notes on the
 
 - Cursor no longer raises a Keychain prompt for the Cursor app's token or
   Conductor's saved `CURSOR_API_KEY` when a silent source (the Cursor app
-  session, environment, a running Conductor process) already works.
+  session, environment, a running Conductor process) already works. Once
+  macOS hands one over, even with a one-time Allow, it is kept until the app
+  quits or Cursor calls it stale.
 - Denying a Keychain prompt for another app's item (Claude Code, Cursor,
   Conductor) is remembered: the app stops asking, even after a relaunch, until
   Settings → Keychain → Ask again.
