@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import CoreFoundation
+import os
 
 /// Reads provider credentials already stored on this Mac, plus keys the user
 /// explicitly saved in the app's Keychain items. Nothing is written back to a
@@ -900,41 +901,42 @@ enum Fetcher {
 
     static func fetchCursor(monthlyBudget: Double?) async -> Provider {
         var provider = Provider(name: "Cursor")
-        let candidates = cursorCandidates()
-        guard !candidates.isEmpty else {
+        var lastError: String?
+        var fallback: Provider?
+        var seen = Set<String>()
+        for source in [cursorCandidates, cursorKeychainCandidates] {
+            for candidate in source() where seen.insert(candidate.secret).inserted {
+                provider.loggedIn = true
+                provider.credentialSource = candidate.source
+                if candidate.isAPIKey {
+                    let result = await fetchCursorAdmin(candidate: candidate, monthlyBudget: monthlyBudget)
+                    if result.skipToNext {
+                        lastError = result.provider.error ?? lastError
+                        if result.provider.ok { fallback = result.provider }
+                        continue
+                    }
+                    return result.provider
+                }
+                if let session = candidate.session {
+                    let result = await fetchCursorSession(session, source: candidate.source)
+                    if result.skipToNext {
+                        lastError = result.provider.error ?? lastError
+                        if result.provider.ok { fallback = result.provider }
+                        continue
+                    }
+                    return result.provider
+                }
+                if candidate.authoritative {
+                    provider.error = "key rejected — update it in Settings"
+                    return provider
+                }
+            }
+        }
+
+        guard !seen.isEmpty else {
             provider.error = CursorBudget.notConnectedMessage
             return provider
         }
-        provider.loggedIn = true
-
-        var lastError: String?
-        var fallback: Provider?
-        for candidate in candidates {
-            provider.credentialSource = candidate.source
-            if candidate.isAPIKey {
-                let result = await fetchCursorAdmin(candidate: candidate, monthlyBudget: monthlyBudget)
-                if result.skipToNext {
-                    lastError = result.provider.error ?? lastError
-                    if result.provider.ok { fallback = result.provider }
-                    continue
-                }
-                return result.provider
-            }
-            if let session = candidate.session {
-                let result = await fetchCursorSession(session, source: candidate.source)
-                if result.skipToNext {
-                    lastError = result.provider.error ?? lastError
-                    if result.provider.ok { fallback = result.provider }
-                    continue
-                }
-                return result.provider
-            }
-            if candidate.authoritative {
-                provider.error = "key rejected — update it in Settings"
-                return provider
-            }
-        }
-
         if let fallback { return fallback }
         provider.error = lastError ?? "stored key was rejected"
         return provider
@@ -1068,6 +1070,18 @@ enum Fetcher {
             candidates.append(.init(secret: jwt, source: .cursorApp, authoritative: false))
         }
         #if !APP_STORE
+        candidates += conductorCursorKeys().map {
+            .init(secret: $0, source: .conductor, authoritative: false)
+        }
+        #endif
+        return candidates
+    }
+
+    /// Other apps' Keychain items raise a macOS prompt, so they are read only
+    /// once every silent source has been tried.
+    private static func cursorKeychainCandidates() -> [CursorCredential.Candidate] {
+        var candidates: [CursorCredential.Candidate] = []
+        #if !APP_STORE
         if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
             .flatMap({ String(data: $0, encoding: .utf8) })
         {
@@ -1081,13 +1095,8 @@ enum Fetcher {
         {
             candidates.append(.init(secret: key, source: .conductor, authoritative: false))
         }
-        candidates += conductorCursorKeys().map {
-            .init(secret: $0, source: .conductor, authoritative: false)
-        }
         #endif
-
-        var seen = Set<String>()
-        return candidates.filter { seen.insert($0.secret).inserted }
+        return candidates
     }
 
     private static func codexAuthData(entry: CodexProfile.Entry) -> Data? {
@@ -1208,6 +1217,7 @@ enum Fetcher {
             if let saved = CursorKeychain.read(), let jwt = CursorCredential.session(from: saved)?.jwt {
                 return jwtExpiry(jwt)
             }
+            if let jwt = cursorStateToken() { return jwtExpiry(jwt) }
             #if !APP_STORE
             if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
                 .flatMap({ String(data: $0, encoding: .utf8) })
@@ -1215,7 +1225,7 @@ enum Fetcher {
                 return jwtExpiry(jwt)
             }
             #endif
-            return cursorStateToken().flatMap(jwtExpiry)
+            return nil
         default:
             return nil
         }
@@ -1314,14 +1324,47 @@ enum Fetcher {
     /// the app out of the keychain-entitlement business and reuses the consent
     /// the item's ACL already grants `security`. macOS asks the first time.
     private static func keychainSecret(service: String, account: String? = nil) -> Data? {
+        let item = "\(service)|\(account ?? "")"
+        if deniedKeychainItems.withLock({ $0.contains(item) }) { return nil }
         var arguments = ["find-generic-password", "-s", service]
         if let account { arguments += ["-a", account] }
         arguments.append("-w")
-        return runProcess(
+        guard let result = runProcessStatus(
             executableURL: URL(fileURLWithPath: "/usr/bin/security"),
             arguments: arguments,
             timeout: 15
-        )
+        ) else { return nil }
+        if isKeychainDenial(result.status) {
+            deniedKeychainItems.withLock {
+                $0.insert(item)
+                UserDefaults.standard.set(Array($0), forKey: deniedKeychainKey)
+            }
+        }
+        return result.status == 0 ? result.output : nil
+    }
+
+    /// Items the user refused, kept across launches so the prompt is never
+    /// raised again on its own. Settings → Keychain → Ask again clears them.
+    private static let deniedKeychainKey = "deniedKeychainItems"
+    private static let deniedKeychainItems = OSAllocatedUnfairLock(
+        initialState: Set(UserDefaults.standard.stringArray(forKey: deniedKeychainKey) ?? [])
+    )
+
+    static var hasKeychainDenials: Bool {
+        deniedKeychainItems.withLock { !$0.isEmpty }
+    }
+
+    static func forgetKeychainDenials() {
+        deniedKeychainItems.withLock {
+            $0.removeAll()
+            UserDefaults.standard.removeObject(forKey: deniedKeychainKey)
+        }
+    }
+
+    /// `security` exits with the low byte of the OSStatus: errSecAuthFailed
+    /// (-25293, the Deny button) gives 51, errSecUserCanceled (-128) gives 128.
+    static func isKeychainDenial(_ status: Int32) -> Bool {
+        status == 51 || status == 128
     }
 
     /// Run a small helper process without allowing an unanswered system prompt
@@ -1331,6 +1374,21 @@ enum Fetcher {
         arguments: [String],
         timeout: TimeInterval
     ) -> Data? {
+        guard let result = runProcessStatus(
+            executableURL: executableURL,
+            arguments: arguments,
+            timeout: timeout
+        ), result.status == 0 else { return nil }
+        return result.output
+    }
+
+    /// Like `runProcess`, but keeps the exit status. Nil when the process could
+    /// not start or was killed at the timeout.
+    static func runProcessStatus(
+        executableURL: URL,
+        arguments: [String],
+        timeout: TimeInterval
+    ) -> (status: Int32, output: Data)? {
         let task = Process()
         task.executableURL = executableURL
         task.arguments = arguments
@@ -1358,7 +1416,7 @@ enum Fetcher {
         }
 
         let out = pipe.fileHandleForReading.readDataToEndOfFile()
-        return task.terminationStatus == 0 ? out : nil
+        return (task.terminationStatus, out)
     }
 
     private static func epoch(fromISO value: String?) -> Int? {

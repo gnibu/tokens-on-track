@@ -66,6 +66,11 @@ published with generated notes on the
 
 ### Fixed
 
+- Cursor no longer raises a Keychain prompt for the Cursor app's token or
+  Conductor's saved `CURSOR_API_KEY` when a silent source (the Cursor app
+  session, environment, a running Conductor process) already works.
+- Denying a Keychain prompt is remembered: the app stops asking, even after a
+  relaunch, until Settings → Keychain → Ask again.
 - The usage alert no longer fires while a window is on or under target, e.g.
   61% of the week the day before it resets.
 - Alerts no longer repeat every poll when Claude's reset time flips between

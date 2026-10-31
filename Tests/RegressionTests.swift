@@ -13,6 +13,7 @@ enum RegressionTests {
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()
         testProcessIsTerminatedAtTimeout()
+        testKeychainDenialIsRecognised()
         testClaudeLimitsAreParsedGenerically()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
@@ -160,6 +161,22 @@ enum RegressionTests {
             Date().timeIntervalSince(startedAt) < 2,
             "timed-out helper process must be terminated promptly"
         )
+    }
+
+    private static func testKeychainDenialIsRecognised() {
+        let denied = Fetcher.runProcessStatus(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 51"],
+            timeout: 1
+        )
+        check(denied?.status == 51, "helper process exit status must be kept")
+        check(
+            denied.map { Fetcher.isKeychainDenial($0.status) } == true,
+            "Deny on a keychain prompt must be remembered"
+        )
+        check(Fetcher.isKeychainDenial(128), "cancelled keychain prompt must be remembered")
+        check(!Fetcher.isKeychainDenial(44), "a missing keychain item is not a refusal")
+        check(!Fetcher.isKeychainDenial(0), "a granted keychain item is not a refusal")
     }
 
     // ----------------------------------------------------------------- //

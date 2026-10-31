@@ -119,6 +119,7 @@ private struct SettingsTab: View {
                     #if APP_STORE
                     connectionsGroup
                     #endif
+                    keychainGroup
                     menuBarGroup
                     displayGroup
                     claudeAccountsGroup
@@ -229,6 +230,26 @@ private struct SettingsTab: View {
                         .onChange(of: preferences.menuBarFairShare) { _, _ in
                             store.iconPreferenceChanged()
                         }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var keychainGroup: some View {
+        if store.hasKeychainDenials {
+            Group {
+                groupTitle("Keychain")
+
+                DividedRows {
+                    SettingRow(
+                        title: "Access refused",
+                        subtitle: "Deny was clicked on a Keychain prompt, so it is no longer shown"
+                    ) {
+                        GlassButton(label: "Ask again") {
+                            Task { await store.retryKeychainAccess() }
+                        }
+                    }
                 }
             }
         }
