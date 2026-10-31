@@ -271,9 +271,9 @@ Worth understanding before running something that touches your API credentials.
 - Another app's Keychain item — the Cursor app's `cursor-access-token`, or
   Conductor's saved `CURSOR_API_KEY` in `com.conductor.app.production.settings`
   — is read only when no other Cursor source works. macOS names the reader
-  `security` in that prompt. Clicking **Deny** on any Keychain prompt is
-  remembered, even after a relaunch; **Settings → Keychain → Ask again** lets
-  macOS ask once more.
+  `security` in that prompt. Clicking **Deny** on a prompt for another app's
+  item (Claude Code, Cursor, Conductor) is remembered, even after a relaunch;
+  **Settings → Keychain → Ask again** lets macOS ask once more.
 - Conductor's OpenCode Go, OpenRouter, or Cursor key is available only inside its managed
   process. While that process is running, the app can read its same-user process
   environment as a best-effort fallback; it never copies that key into storage.

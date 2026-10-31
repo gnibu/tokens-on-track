@@ -904,7 +904,7 @@ enum Fetcher {
         var lastError: String?
         var fallback: Provider?
         var seen = Set<String>()
-        for source in [cursorCandidates, cursorKeychainCandidates] {
+        for source in [cursorCandidates, cursorAppKeychainCandidates, conductorKeychainCandidates] {
             for candidate in source() where seen.insert(candidate.secret).inserted {
                 provider.loggedIn = true
                 provider.credentialSource = candidate.source
@@ -1077,26 +1077,30 @@ enum Fetcher {
         return candidates
     }
 
-    /// Other apps' Keychain items raise a macOS prompt, so they are read only
-    /// once every silent source has been tried.
-    private static func cursorKeychainCandidates() -> [CursorCredential.Candidate] {
-        var candidates: [CursorCredential.Candidate] = []
-        #if !APP_STORE
-        if let jwt = keychainSecret(service: CursorCredential.accessTokenService)
-            .flatMap({ String(data: $0, encoding: .utf8) })
-        {
-            candidates.append(.init(secret: jwt, source: .cursorApp, authoritative: false))
-        }
-        if let key = keychainSecret(
+    /// Other apps' Keychain items raise a macOS prompt, so each is read only
+    /// once every silent source, and the item before it, has been tried.
+    private static func cursorAppKeychainCandidates() -> [CursorCredential.Candidate] {
+        #if APP_STORE
+        return []
+        #else
+        return keychainSecret(service: CursorCredential.accessTokenService)
+            .flatMap { String(data: $0, encoding: .utf8) }
+            .map { [.init(secret: $0, source: .cursorApp, authoritative: false)] } ?? []
+        #endif
+    }
+
+    private static func conductorKeychainCandidates() -> [CursorCredential.Candidate] {
+        #if APP_STORE
+        return []
+        #else
+        guard let key = keychainSecret(
             service: CursorCredential.conductorSettingsService,
             account: CursorCredential.conductorAPIKeyAccount
         ).flatMap({ String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }),
-           !key.isEmpty
-        {
-            candidates.append(.init(secret: key, source: .conductor, authoritative: false))
-        }
+              !key.isEmpty
+        else { return [] }
+        return [.init(secret: key, source: .conductor, authoritative: false)]
         #endif
-        return candidates
     }
 
     private static func codexAuthData(entry: CodexProfile.Entry) -> Data? {

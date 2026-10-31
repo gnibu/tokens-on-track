@@ -247,7 +247,7 @@ private struct SettingsTab: View {
                         subtitle: "Deny was clicked on a Keychain prompt, so it is no longer shown"
                     ) {
                         GlassButton(label: "Ask again") {
-                            Task { await store.retryKeychainAccess() }
+                            store.retryKeychainAccess()
                         }
                     }
                 }

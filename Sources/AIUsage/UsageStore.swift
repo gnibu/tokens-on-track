@@ -495,10 +495,10 @@ final class UsageStore: ObservableObject {
     }
 
     /// Settings → Keychain → Ask again: let macOS prompt for refused items once more.
-    func retryKeychainAccess() async {
+    func retryKeychainAccess() {
         Fetcher.forgetKeychainDenials()
         hasKeychainDenials = false
-        await refresh()
+        connectionsChanged()
     }
 
     @discardableResult
