@@ -204,7 +204,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 
 | Provider | Credential | Endpoint |
 | --- | --- | --- |
-| Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+) | `GET api.anthropic.com/api/oauth/usage` |
+| Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+), or a setup token entered in Settings (app Keychain item) | `GET api.anthropic.com/api/oauth/usage`, or with a setup token `POST api.anthropic.com/v1/messages` |
 | Codex | One `auth.json` per Codex profile (`~/.codex`, or another `CODEX_HOME` folder) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenCode Go | app Keychain item, active OpenCode account, `OPENCODE_GO_API_KEY` / `OPENCODE_API_KEY`, or a running Conductor OpenCode process | `GET opencode.ai/zen/go/v1/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
@@ -220,7 +220,8 @@ cannot read usage.
 
 Which windows appear depends on what each API returns for your plan:
 
-- Claude reports `five_hour` and `seven_day`.
+- Claude reports `five_hour` and `seven_day`. A setup token reads the same two
+  limits from the headers of a Haiku reply.
 - Codex reports a primary window, an optional secondary one, and any
   named model-specific buckets from `additional_rate_limits` (for example,
   `GPT-5.3-Codex-Spark`) as their own compact rows, such as `week (Spark)`.
