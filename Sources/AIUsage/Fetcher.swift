@@ -10,6 +10,7 @@ enum Fetcher {
     static let keychainService = "Claude Code-credentials"
     static let claudeUsageURL = URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1")!
     static let claudeProfileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
+    static let claudeMessagesURL = URL(string: "https://api.anthropic.com/v1/messages")!
     static let claudeUserAgent = "claude-cli/2.1.308 (external, cli)"
     static let codexUsageURL = URL(string: "https://chatgpt.com/backend-api/codex/usage")!
     static let codexResetConsumeURL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume")!
@@ -101,15 +102,20 @@ enum Fetcher {
             oauthCache[entry.keychainService] = snapshot
             return snapshot
         }
-        let loggedIn = catalog.filter { oauth($0) != nil }
-        var pollable = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
+        // A saved setup token replaces the login, so its Keychain item is not read.
+        let withSetupToken = catalog.filter { ClaudeSetupTokenKeychain.read(account: $0.id) != nil }
+        let tokenIDs = Set(withSetupToken.map(\.id))
+        let loggedIn = catalog.filter { !tokenIDs.contains($0.id) && oauth($0) != nil }
+        let collapsed = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
             if let hit = oauthCache[service] { return hit }
             let snapshot = keychainSecret(service: service).flatMap(ClaudeProfile.parseOAuth)
             oauthCache[service] = snapshot
             return snapshot
         })
+        let keptIDs = tokenIDs.union(collapsed.map(\.id))
+        var pollable = catalog.filter { keptIDs.contains($0.id) }
         let seen = Set(pollable.map(\.normalizedPath))
-        let loggedInPaths = Set(loggedIn.map(\.normalizedPath))
+        let loggedInPaths = Set((loggedIn + withSetupToken).map(\.normalizedPath))
         for entry in catalog {
             let path = entry.normalizedPath
             if path == ClaudeProfile.defaultNormalizedPath,
@@ -120,7 +126,7 @@ enum Fetcher {
                 pollable.append(entry)
             }
         }
-        return (pollable, loggedIn.map(\.normalizedPath))
+        return (pollable, Array(loggedInPaths))
     }
 
     /// Resolve readable Codex homes and collapse profiles which contain the
@@ -176,6 +182,10 @@ enum Fetcher {
             profilePath: entry.normalizedPath
         )
 
+        if let token = ClaudeSetupTokenKeychain.read(account: entry.id) {
+            return await fetchClaude(setupToken: token, into: provider)
+        }
+
         guard let blob = keychainSecret(service: entry.keychainService) else {
             provider.error = "keychain unavailable"
             return provider
@@ -210,6 +220,80 @@ enum Fetcher {
         provider.ok = !provider.windows.isEmpty
         if !provider.ok { provider.error = "no limit data" }
         return provider
+    }
+
+    /// A setup token may only send messages, so a short Haiku message stands in
+    /// for the usage call: the limits come back in the reply's headers. Never
+    /// retried, because every attempt that lands counts against the account.
+    private static func fetchClaude(setupToken: String, into provider: Provider) async -> Provider {
+        var request = URLRequest(url: claudeMessagesURL, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(setupToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Tokens on Track", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            // claude-haiku-5-5 answered a setup token with a bare 429 and no limits.
+            "model": "claude-haiku-4-5",
+            "max_tokens": 10,
+            "messages": [["role": "user", "content": "hi"]],
+        ] as [String: Any])
+
+        var provider = provider
+        provider.loggedIn = true
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                provider.error = "no limit data"
+                return provider
+            }
+            return claudeSetupTokenReading(
+                status: http.statusCode,
+                header: { http.value(forHTTPHeaderField: $0) },
+                refusal: (json(data)?["error"] as? [String: Any])?["message"] as? String,
+                into: provider
+            )
+        } catch {
+            provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
+            provider.unreachable = true
+            return provider
+        }
+    }
+
+    /// A 429 still carries the limits, and a full window is the reading most
+    /// worth showing. A rejected token stays rejected, so it is not `staleToken`.
+    static func claudeSetupTokenReading(
+        status: Int,
+        header: (String) -> String?,
+        refusal: String? = nil,
+        into provider: Provider
+    ) -> Provider {
+        var provider = provider
+        provider.windows = claudeWindows(rateLimitHeader: header)
+        provider.ok = !provider.windows.isEmpty
+        if provider.ok { return provider }
+        switch status {
+        case 200..<300: provider.error = "no limit data"
+        case 401: provider.error = "setup token rejected — create a new one with claude setup-token"
+        default:
+            provider.error = refusal.map { "http \(status): \($0.prefix(160))" }
+                ?? note(for: status, refreshWith: "claude")
+        }
+        return provider
+    }
+
+    /// Utilization arrives as a 0–1 fraction and the reset as epoch seconds.
+    static func claudeWindows(rateLimitHeader header: (String) -> String?) -> [UsageWindow] {
+        [("5h", "5h", 5 * 3600), ("7d", "week", 7 * 86_400)].compactMap { key, label, length in
+            let prefix = "anthropic-ratelimit-unified-\(key)"
+            guard let raw = header("\(prefix)-utilization"),
+                  let fraction = Double(raw), fraction.isFinite, fraction >= 0
+            else { return nil }
+            let reset = header("\(prefix)-reset").flatMap(Double.init).flatMap(Int.init(exactly:))
+            return UsageWindow(label: label, percent: fraction * 100, resetsAt: reset, windowSeconds: length)
+        }
     }
 
     private static func claudeHeaders(_ token: String) -> [String: String] {

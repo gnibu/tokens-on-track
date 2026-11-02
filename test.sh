@@ -25,6 +25,7 @@ swiftc -parse-as-library "$@" \
     Sources/AIUsage/WorkSchedule.swift \
     Sources/AIUsage/Pace.swift \
     Sources/AIUsage/ClaudeProfile.swift \
+    Sources/AIUsage/ClaudeSetupTokenKeychain.swift \
     Sources/AIUsage/CodexProfile.swift \
     Sources/AIUsage/CodexAccountAccess.swift \
     Sources/AIUsage/Fetcher.swift \

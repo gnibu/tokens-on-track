@@ -65,6 +65,90 @@ struct ClaudeAccountsGroup: View {
     }
 }
 
+/// Same controls as the OpenRouter key: the token is written straight to the
+/// app's Keychain item and the field never shows a saved value.
+private struct ClaudeSetupTokenField: View {
+    let account: String
+    @EnvironmentObject private var store: UsageStore
+    @State private var hasToken = false
+    @State private var editing = false
+    @State private var token = ""
+    @State private var error: String?
+
+    var body: some View {
+        SettingRow(title: "Setup token", subtitle: error ?? subtitle) {
+            if editing {
+                VStack(alignment: .trailing, spacing: 6) {
+                    SecureField("sk-ant-oat…", text: $token)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11).monospaced())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(width: 150)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.black.opacity(0.25))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.14))
+                        )
+
+                    HStack(spacing: 10) {
+                        GlassLink(title: "Cancel") {
+                            editing = false
+                            token = ""
+                            error = nil
+                        }
+                        GlassButton(label: "Save", enabled: !ClaudeSetupTokenKeychain.normalized(token).isEmpty) {
+                            save()
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    if hasToken {
+                        GlassLink(title: "Remove") { remove() }
+                    }
+                    GlassButton(label: hasToken ? "Replace…" : "Add token…") {
+                        editing = true
+                        error = nil
+                    }
+                }
+            }
+        }
+        .onAppear { hasToken = ClaudeSetupTokenKeychain.read(account: account) != nil }
+    }
+
+    private var subtitle: String {
+        hasToken
+            ? "used instead of the Claude Code login; each refresh sends Haiku a short message"
+            : "from claude setup-token; each refresh then sends Haiku a short message"
+    }
+
+    private func save() {
+        guard ClaudeSetupTokenKeychain.save(token, account: account) else {
+            error = "Could not save the token in Keychain"
+            return
+        }
+        hasToken = true
+        editing = false
+        token = ""
+        error = nil
+        store.connectionsChanged()
+    }
+
+    private func remove() {
+        guard ClaudeSetupTokenKeychain.remove(account: account) else {
+            error = "Could not remove the token from Keychain"
+            return
+        }
+        hasToken = false
+        error = nil
+        store.connectionsChanged()
+    }
+}
+
 private struct ClaudeAccountRow: View {
     let entry: ClaudeProfile.Entry
     let report: Report?
@@ -86,7 +170,9 @@ private struct ClaudeAccountRow: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
+            ClaudeSetupTokenField(account: entry.id)
             GlassLink(title: "Remove") {
+                ClaudeSetupTokenKeychain.remove(account: entry.id)
                 preferences.removeClaudeProfile(path: entry.normalizedPath)
                 store.connectionsChanged()
             }

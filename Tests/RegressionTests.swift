@@ -17,6 +17,7 @@ enum RegressionTests {
         testKeychainDenialIsRemembered()
         testGrantedKeychainSecretIsKept()
         testClaudeLimitsAreParsedGenerically()
+        testClaudeSetupTokenReading()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
         testClaudeKeychainServiceDerivation()
@@ -252,6 +253,42 @@ enum RegressionTests {
     // ----------------------------------------------------------------- //
     // Claude's structured limits include model-scoped rows.
     // ----------------------------------------------------------------- //
+
+    private static func testClaudeSetupTokenReading() {
+        let provider = Provider(id: "claude", kind: "claude", name: "Claude")
+        let headers = [
+            "anthropic-ratelimit-unified-5h-utilization": "0.25",
+            "anthropic-ratelimit-unified-5h-reset": "1790000000",
+            "anthropic-ratelimit-unified-7d-utilization": "1.0",
+        ]
+        let reading = Fetcher.claudeSetupTokenReading(status: 200, header: { headers[$0] }, into: provider)
+        check(reading.ok && reading.error == nil, "limits in the reply must make a good reading")
+        check(reading.windows.map(\.label) == ["5h", "week"], "both limits must become rows")
+        check(reading.windows.map(\.percent) == [25, 100], "utilization is a fraction of 1")
+        check(reading.windows[0].resetsAt == 1_790_000_000, "the reset is epoch seconds")
+        check(reading.windows[1].resetsAt == nil, "a missing reset must not invent one")
+
+        let limited = Fetcher.claudeSetupTokenReading(status: 429, header: { headers[$0] }, into: provider)
+        check(limited.ok, "a rate-limited reply still carries the limits")
+
+        let bad = ["anthropic-ratelimit-unified-5h-utilization": "nan"]
+        let empty = Fetcher.claudeSetupTokenReading(status: 200, header: { bad[$0] }, into: provider)
+        check(!empty.ok && empty.error == "no limit data", "malformed limits must not become rows")
+
+        let rejected = Fetcher.claudeSetupTokenReading(status: 401, header: { _ in nil }, into: provider)
+        check(rejected.error?.contains("claude setup-token") == true, "a rejected token must say how to fix it")
+        check(!rejected.staleToken, "a rejected token must not trigger fast polling")
+
+        let refused = Fetcher.claudeSetupTokenReading(
+            status: 429, header: { _ in nil }, refusal: "not allowed", into: provider
+        )
+        check(refused.error == "http 429: not allowed", "a refusal without limits must show the server's reason")
+
+        check(
+            ClaudeSetupTokenKeychain.normalized(" sk-ant-\noat01\r\n-abc ") == "sk-ant-oat01-abc",
+            "a wrapped paste must become one token"
+        )
+    }
 
     private static func testClaudeLimitsAreParsedGenerically() {
         let data: [String: Any] = [
