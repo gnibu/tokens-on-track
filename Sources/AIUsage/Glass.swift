@@ -191,7 +191,10 @@ struct UsageTrack: View {
                     )
 
                 fill(in: width, radius: radius)
-
+            }
+            // An overlay, because inside the stack the taller mark stretched the
+            // track to its own height and pushed it below the row (measured).
+            .overlay(alignment: .leading) {
                 // Where usage *should* be if spent evenly across the window.
                 if let target, target > 0 {
                     RoundedRectangle(cornerRadius: 1, style: .continuous)
@@ -207,16 +210,16 @@ struct UsageTrack: View {
     }
 
     /// An untouched window still gets a stub, so the row reads as a track with
-    /// nothing in it rather than as a track that failed to draw.
+    /// nothing in it rather than as a track that failed to draw. It keeps the
+    /// pace colour: grey is reserved for readings that are not live.
     @ViewBuilder
     private func fill(in width: CGFloat, radius: CGFloat) -> some View {
-        let idle = percent < 0.5
         let drawn = max(6, width * min(100, max(0, percent)) / 100)
 
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(idle ? Pace.idleFill : palette.fill)
-            .frame(width: idle ? 6 : drawn)
-            .shadow(color: glows && !idle ? palette.base.opacity(0.55) : .clear, radius: 6)
+            .fill(palette.fill)
+            .frame(width: drawn)
+            .shadow(color: glows ? palette.base.opacity(0.55) : .clear, radius: 6)
     }
 }
 

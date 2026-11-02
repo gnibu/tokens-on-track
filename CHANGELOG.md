@@ -70,6 +70,8 @@ published with generated notes on the
 
 ### Fixed
 
+- Usage bars line up with their figures and keep their intended height. A live
+  0% now shows in full ink and pace colour; only a carried reading is grey.
 - Cursor no longer raises a Keychain prompt for the Cursor app's token or
   Conductor's saved `CURSOR_API_KEY` when a silent source (the Cursor app
   session, environment, a running Conductor process) already works. Once

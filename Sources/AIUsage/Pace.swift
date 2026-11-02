@@ -21,12 +21,6 @@ enum Pace {
         }
     }
 
-    static let idleFill = LinearGradient(
-        colors: [.white.opacity(0.5), .white.opacity(0.3)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
     struct Severity: Comparable {
         let tier: Int
         let percent: Double
