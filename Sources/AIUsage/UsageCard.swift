@@ -20,13 +20,13 @@ struct RowMetrics {
     let glows: Bool
 
     static let card = RowMetrics(
-        label: 112, percent: 46, reset: 88, trackHeight: 10, gap: 12,
+        label: 112, percent: 46, reset: 88, trackHeight: 14, gap: 12,
         labelSize: 14, percentSize: 14, resetSize: 12, markSize: 16, glows: true
     )
 
     // Leave room for a scoped model label such as "week (Fable)".
     static let menu = RowMetrics(
-        label: 112, percent: 38, reset: 70, trackHeight: 8, gap: 10,
+        label: 112, percent: 38, reset: 70, trackHeight: 12, gap: 10,
         labelSize: 12, percentSize: 12, resetSize: 11, markSize: 14, glows: false
     )
 }
@@ -344,7 +344,7 @@ struct ProviderBlock: View {
         let ticks = expiries.flatMap { [$0.addingTimeInterval(-24 * 3600), $0] }.filter { $0 > now }.sorted()
         TimelineView(.explicit([now] + ticks)) { context in
             let resetCredits = provider.resetCredits?.current(at: context.date)
-            VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+            VStack(alignment: .leading, spacing: metrics.labelSize == 14 ? 10 : 9) {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     BrandMark(provider: provider.kind, size: metrics.markSize)
                         // Marks are centred on their own box, names sit on a
@@ -395,7 +395,7 @@ struct ProviderBlock: View {
                 // draw is named once by `OutageNotice` instead of getting an empty
                 // block of its own. Carried rows are dimmed, so they cannot be
                 // mistaken for numbers just measured.
-                VStack(alignment: .leading, spacing: metrics.trackHeight == 10 ? 10 : 9) {
+                VStack(alignment: .leading, spacing: metrics.labelSize == 14 ? 10 : 9) {
                     ForEach(provider.windows) { window in
                         UsageRow(
                             window: window,
@@ -663,17 +663,18 @@ struct UsageRow: View {
                 dimmed: dimmed
             )
             .alignmentGuide(.firstTextBaseline) { dimensions in
-                // Sit the bar on the label's baseline like the figures beside it.
-                dimensions[.bottom] - metrics.trackHeight * 0.55
+                // Centre the bar on the figures beside it: half their cap height
+                // above the baseline.
+                dimensions[VerticalAlignment.center] + metrics.percentSize * 0.35
             }
 
-            // Dimmed when there is nothing to report and when the window is too
-            // young to have a stable target comparison, so a dash reads as
-            // "not yet" rather than as a reading in its own right.
+            // Dimmed when the window is too young to have a stable target
+            // comparison, so a dash reads as "not yet" rather than as a reading
+            // in its own right. A live 0% is a reading, so it stays full ink.
             Text(reading.text)
                 .font(.system(size: metrics.percentSize, weight: .semibold))
                 .monospacedDigit()
-                .foregroundStyle(rowInk(window.percent < 0.5 || !reading.hasValue ? 0.55 : 1))
+                .foregroundStyle(rowInk(reading.hasValue ? 1 : 0.55))
                 .frame(width: metrics.percent, alignment: .trailing)
 
             Text(Pace.resetLabel(window.resetsAt))
