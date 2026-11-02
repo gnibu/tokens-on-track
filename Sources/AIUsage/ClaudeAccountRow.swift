@@ -156,6 +156,7 @@ private struct ClaudeAccountRow: View {
     @EnvironmentObject private var store: UsageStore
     @State private var labelText: String = ""
     @State private var committedLabelText: String = ""
+    @State private var removeError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -166,13 +167,16 @@ private struct ClaudeAccountRow: View {
                 onCommit: commitLabel
             )
             .onAppear { syncLabel() }
-            Text(statusLine)
+            Text(removeError ?? statusLine)
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
             ClaudeSetupTokenField(account: entry.id)
             GlassLink(title: "Remove") {
-                ClaudeSetupTokenKeychain.remove(account: entry.id)
+                guard ClaudeSetupTokenKeychain.remove(account: entry.id) else {
+                    removeError = "Could not remove the token from Keychain"
+                    return
+                }
                 preferences.removeClaudeProfile(path: entry.normalizedPath)
                 store.connectionsChanged()
             }

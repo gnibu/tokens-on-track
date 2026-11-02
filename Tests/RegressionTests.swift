@@ -285,6 +285,15 @@ enum RegressionTests {
         check(refused.error == "http 429: not allowed", "a refusal without limits must show the server's reason")
 
         check(
+            Fetcher.claudeMessageNeverSent(URLError(.notConnectedToInternet)),
+            "offline costs nothing, so it may retry every minute"
+        )
+        check(
+            !Fetcher.claudeMessageNeverSent(URLError(.timedOut)),
+            "a timeout may have counted as usage, so it must wait for the normal interval"
+        )
+
+        check(
             ClaudeSetupTokenKeychain.normalized(" sk-ant-\noat01\r\n-abc ") == "sk-ant-oat01-abc",
             "a wrapped paste must become one token"
         )

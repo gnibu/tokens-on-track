@@ -97,25 +97,22 @@ enum Fetcher {
         var oauthCache: [String: ClaudeProfile.OAuthSnapshot?] = [:]
         func oauth(_ entry: ClaudeProfile.Entry) -> ClaudeProfile.OAuthSnapshot? {
             if let hit = oauthCache[entry.keychainService] { return hit }
-            let snapshot = keychainSecret(service: entry.keychainService)
-                .flatMap(ClaudeProfile.parseOAuth)
+            // A saved setup token replaces the login, so its Keychain item is not read.
+            let snapshot = ClaudeSetupTokenKeychain.read(account: entry.id)
+                .map { ClaudeProfile.OAuthSnapshot(accessToken: $0, subscriptionType: nil, expiresAtMs: nil) }
+                ?? keychainSecret(service: entry.keychainService).flatMap(ClaudeProfile.parseOAuth)
             oauthCache[entry.keychainService] = snapshot
             return snapshot
         }
-        // A saved setup token replaces the login, so its Keychain item is not read.
-        let withSetupToken = catalog.filter { ClaudeSetupTokenKeychain.read(account: $0.id) != nil }
-        let tokenIDs = Set(withSetupToken.map(\.id))
-        let loggedIn = catalog.filter { !tokenIDs.contains($0.id) && oauth($0) != nil }
-        let collapsed = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
+        let loggedIn = catalog.filter { oauth($0) != nil }
+        var pollable = ClaudeProfile.collapseDuplicateTokens(loggedIn, oauth: { service in
             if let hit = oauthCache[service] { return hit }
             let snapshot = keychainSecret(service: service).flatMap(ClaudeProfile.parseOAuth)
             oauthCache[service] = snapshot
             return snapshot
         })
-        let keptIDs = tokenIDs.union(collapsed.map(\.id))
-        var pollable = catalog.filter { keptIDs.contains($0.id) }
         let seen = Set(pollable.map(\.normalizedPath))
-        let loggedInPaths = Set((loggedIn + withSetupToken).map(\.normalizedPath))
+        let loggedInPaths = Set(loggedIn.map(\.normalizedPath))
         for entry in catalog {
             let path = entry.normalizedPath
             if path == ClaudeProfile.defaultNormalizedPath,
@@ -126,7 +123,7 @@ enum Fetcher {
                 pollable.append(entry)
             }
         }
-        return (pollable, Array(loggedInPaths))
+        return (pollable, loggedIn.map(\.normalizedPath))
     }
 
     /// Resolve readable Codex homes and collapse profiles which contain the
@@ -257,9 +254,16 @@ enum Fetcher {
             )
         } catch {
             provider.error = "unreachable — \(error.localizedDescription.prefix(60))"
-            provider.unreachable = true
+            provider.unreachable = claudeMessageNeverSent(error)
             return provider
         }
+    }
+
+    /// The minute-long retry is free only when the message never left. A timeout
+    /// or dropped connection may follow a message that already counted as usage.
+    static func claudeMessageNeverSent(_ error: Error) -> Bool {
+        guard let code = (error as? URLError)?.code else { return false }
+        return [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(code)
     }
 
     /// A 429 still carries the limits, and a full window is the reading most
