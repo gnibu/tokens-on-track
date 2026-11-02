@@ -35,8 +35,15 @@ swiftc -parse-as-library "$@" \
     Sources/AIUsage/BrandGlyph.swift \
     Sources/AIUsage/StatusIcon.swift \
     Sources/AIUsage/AgentServer.swift \
+    Sources/AIUsage/Glass.swift \
+    Sources/AIUsage/UsageCard.swift \
+    Sources/AIUsage/UsageStore.swift \
+    Sources/AIUsage/Preferences.swift \
+    Sources/AIUsage/Notifier.swift \
+    Sources/AIUsage/ClaudeAccountAccess.swift \
     Tests/RegressionTests.swift \
     Tests/ProviderFolderAccessTests.swift \
+    Tests/UsageRowRenderTests.swift \
     -o "$TEST_BINARY"
 
 # Unbundled, so point the icon lookup at the working copy rather than at the
