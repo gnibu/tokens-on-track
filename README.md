@@ -204,7 +204,7 @@ bar ring, the dropdown and the desktop card can never disagree.
 
 | Provider | Credential | Endpoint |
 | --- | --- | --- |
-| Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+) | `GET api.anthropic.com/api/oauth/usage` |
+| Claude | One Keychain item per Claude Code profile (`Claude Code-credentials` for `~/.claude`, or `Claude Code-credentials-<hash>` for other `CLAUDE_CONFIG_DIR` paths; Claude Code 2.1.56+), or a setup token entered in Settings (app Keychain item) | `GET api.anthropic.com/api/oauth/usage`, or with a setup token `POST api.anthropic.com/v1/messages` |
 | Codex | One `auth.json` per Codex profile (`~/.codex`, or another `CODEX_HOME` folder) | `GET chatgpt.com/backend-api/codex/usage` |
 | OpenCode Go | app Keychain item, active OpenCode account, `OPENCODE_GO_API_KEY` / `OPENCODE_API_KEY`, or a running Conductor OpenCode process | `GET opencode.ai/zen/go/v1/usage` |
 | OpenRouter | app Keychain item, OpenCode auth, `OPENROUTER_API_KEY`, or a running Conductor OpenCode process | `GET openrouter.ai/api/v1/key` |
@@ -220,7 +220,8 @@ cannot read usage.
 
 Which windows appear depends on what each API returns for your plan:
 
-- Claude reports `five_hour` and `seven_day`.
+- Claude reports `five_hour` and `seven_day`. A setup token reads the same two
+  limits from the headers of a Haiku reply.
 - Codex reports a primary window, an optional secondary one, and any
   named model-specific buckets from `additional_rate_limits` (for example,
   `GPT-5.3-Codex-Spark`) as their own compact rows, such as `week (Spark)`.
@@ -285,6 +286,12 @@ Worth understanding before running something that touches your API credentials.
 - Read-only on provider-owned credential stores. It never writes or refreshes
   their tokens. Only a key explicitly entered in Settings is written, and only
   to the app's own Keychain item.
+- A Claude setup token entered in Settings replaces that profile's Claude Code
+  login. It can only send messages, so each refresh sends Haiku a message capped
+  at 10 output tokens and reads the limits from the reply's headers. That message
+  counts as usage and can start the 5-hour window. Only 5-hour and weekly rows
+  appear, without saved resets or per-model limits. Anthropic may restrict
+  subscription tokens in third-party apps, so check its terms before using one.
 - No dependencies beyond the system frameworks. The app's own supply chain is
   this repo and nothing else. Read it; it is short.
 - **Downloading is a wider trust decision than building.** Take the `.dmg` and you
@@ -334,7 +341,8 @@ You are still signed in. Each CLI keeps a refresh token and mints a new access
 token when it next runs, so the copy this app reads out of their store lapses on
 its own — overnight, typically. Start the relevant CLI once and the next fetch
 recovers. By design this app never refreshes tokens itself — it will not touch
-your logins.
+your logins. To avoid this for Claude, run `claude setup-token` and add the token
+under **Claude accounts** in Settings.
 
 Until it recovers, the rows carry the last reading that did land, dimmed and
 marked *stale*, with the notice saying when it was taken. They are dropped once

@@ -3,7 +3,7 @@
 <title>Tokens on Track — Privacy</title>
 <style>body{font:17px/1.6 system-ui;max-width:720px;margin:60px auto;padding:0 24px;color:#222}h1,h2{line-height:1.2}a{color:#2863c0}@media(prefers-color-scheme:dark){body{background:#171717;color:#eee}a{color:#91baff}}</style>
 </head><body>
-<h1>Tokens on Track privacy policy</h1><p>Effective October 17, 2026 · Tenjin Tech</p>
+<h1>Tokens on Track privacy policy</h1><p>Effective November 2, 2026 · Tenjin Tech</p>
 <p>This policy explains how the Tokens on Track app for macOS (“the app”) handles information, and the choices and rights you have. “We”, “us” and “our” mean Tenjin Tech, the developer of the app.</p>
 <p><strong>In short:</strong> the app works on your Mac. We do not run accounts, servers, analytics, advertising or tracking for it, and we do not receive your credentials, usage readings or anything else the app processes. The app talks only to the AI providers you connect.</p>
 
@@ -12,13 +12,13 @@
 
 <h2>Information the app processes on your Mac</h2>
 <p>This information stays on your Mac or goes directly to the provider it belongs to. We have no access to it.</p>
-<p><strong>Credentials and connections.</strong> The app reads your Claude Code login from macOS Keychain. The App Store build reads Codex and Cursor login files only from folders you explicitly allow. It never writes to those providers’ credential stores. Folder permissions are stored as macOS security-scoped bookmarks and can be removed in Settings. API keys you enter for OpenCode Go, OpenRouter, or Cursor are stored in this Mac’s Keychain and can be removed in Settings. The direct-download build can also discover credentials from local provider files, environment variables, and supported Conductor processes. The App Store build does not inspect other processes or their environments.</p>
+<p><strong>Credentials and connections.</strong> The app reads your Claude Code login from macOS Keychain. The App Store build reads Codex and Cursor login files only from folders you explicitly allow. It never writes to those providers’ credential stores. Folder permissions are stored as macOS security-scoped bookmarks and can be removed in Settings. API keys you enter for OpenCode Go, OpenRouter, or Cursor, and Claude setup tokens you enter, are stored in this Mac’s Keychain and can be removed in Settings. The direct-download build can also discover credentials from local provider files, environment variables, and supported Conductor processes. The App Store build does not inspect other processes or their environments.</p>
 <p><strong>Usage readings and preferences.</strong> Preferences, folder permissions, notification state, and a cache of usage readings are stored locally. Usage readings can include plan names, limits, spending, and reset times. Notifications are handled by macOS. The App Store build keeps its files in its app container.</p>
 <p><strong>Agent connection.</strong> If you set up the optional agent connection (Model Context Protocol), a coding agent on this Mac can ask the app for the cached usage readings. That connection runs locally, never contacts a provider, and shares no credentials.</p>
 <p>The app does not read conversation content, prompts, or source code.</p>
 
 <h2>Requests to AI providers</h2>
-<p>To show your usage, the app sends your credentials over encrypted connections (HTTPS) to the corresponding provider: Anthropic, OpenAI, OpenCode, OpenRouter, or Cursor. Requests include the information needed to authenticate, such as account identifiers, tokens, or session cookies. Providers receive your IP address. When you choose to redeem a Codex reset credit, the app sends that request to OpenAI on your behalf; it makes no other changes to your provider accounts.</p>
+<p>To show your usage, the app sends your credentials over encrypted connections (HTTPS) to the corresponding provider: Anthropic, OpenAI, OpenCode, OpenRouter, or Cursor. Requests include the information needed to authenticate, such as account identifiers, tokens, or session cookies. Providers receive your IP address. When you choose to redeem a Codex reset credit, the app sends that request to OpenAI on your behalf; if you enter a Claude setup token, each refresh also sends Anthropic a short message, which counts as usage on that account, to read your limits from the reply. The app makes no other changes to your provider accounts.</p>
 <p>These requests go directly from your Mac to the provider. The provider handles them under its own terms and privacy policy, and we are not responsible for its practices. Connect only accounts you are authorized to use.</p>
 
 <h2>Information we receive</h2>
