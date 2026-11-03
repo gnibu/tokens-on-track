@@ -1,77 +1,15 @@
 import AppKit
 import SwiftUI
 
-struct CodexAccountsGroup: View {
-    @EnvironmentObject private var store: UsageStore
-    @ObservedObject private var preferences = Preferences.shared
-
-    var body: some View {
-        Group {
-            groupTitle("Codex accounts")
-            DividedRows {
-                ForEach(entries) { entry in
-                    CodexAccountRow(entry: entry, report: store.report)
-                }
-                addRow
-            }
-        }
-    }
-
-    private var entries: [CodexProfile.Entry] {
-        preferences.codexSettingsEntries(discoveredPaths: store.discoveredCodexPaths)
-    }
-
-    private var addRow: some View {
-        HStack {
-            Text("Add profile folder")
-                .font(.system(size: 13))
-            Spacer()
-            GlassButton(label: "Choose folder…") { chooseFolder() }
-        }
-    }
-
-    private func chooseFolder() {
-        MenuBarItem.shared.performModalPanel {
-            let panel = NSOpenPanel()
-            panel.title = "Add Codex profile"
-            panel.message = "Select a CODEX_HOME folder containing auth.json. Tokens on Track only reads the login; it never changes it."
-            panel.prompt = "Add Profile"
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.canCreateDirectories = false
-            panel.allowsMultipleSelection = false
-            panel.showsHiddenFiles = true
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            #if APP_STORE
-            do {
-                let path = try CodexAccountAccess.shared.select(url)
-                preferences.addCodexProfile(path: path)
-            } catch {
-                return
-            }
-            #else
-            preferences.addCodexProfile(path: url.path)
-            #endif
-            store.connectionsChanged()
-        }
-    }
-
-    private func groupTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Glass.ink(0.42))
-            .textCase(.uppercase)
-            .padding(.bottom, 2)
-    }
-}
-
-private struct CodexAccountRow: View {
+struct CodexAccountRow: View {
     let entry: CodexProfile.Entry
     let report: Report?
     @ObservedObject private var preferences = Preferences.shared
     @EnvironmentObject private var store: UsageStore
     @State private var labelText: String = ""
     @State private var committedLabelText: String = ""
+    @State private var confirmingRemoval = false
+    @State private var folderError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -82,14 +20,31 @@ private struct CodexAccountRow: View {
                 onCommit: commitLabel
             )
             .onAppear { syncLabel() }
-            Text(statusLine)
+            Text(folderError ?? statusLine)
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
-            GlassLink(title: "Remove") {
+            #if APP_STORE
+            GlassButton(label: "Choose folder again…", systemImage: "folder") {
+                guard let url = AccountFolderPicker.choose(for: .codex) else { return }
+                do {
+                    let path = try AccountFolderPicker.save(url, for: .codex, expectedPath: entry.normalizedPath)
+                    _ = DetectedAccount(provider: .codex, path: path).add()
+                    folderError = nil
+                    store.connectionsChanged()
+                } catch { folderError = error.localizedDescription }
+            }
+            #endif
+            GlassLink(title: "Remove account…") { confirmingRemoval = true }
+        }
+        .confirmationDialog("Remove this account from Tokens on Track?", isPresented: $confirmingRemoval) {
+            Button("Remove account", role: .destructive) {
                 preferences.removeCodexProfile(path: entry.normalizedPath)
                 store.connectionsChanged()
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your Codex profile and login files are unchanged.")
         }
     }
 
@@ -105,7 +60,9 @@ private struct CodexAccountRow: View {
         #endif
         if let provider = liveProvider {
             if let error = provider.error, !provider.ok { return error }
-            if provider.loggedIn, provider.ok { return entry.normalizedPath }
+            if provider.loggedIn, provider.ok {
+                return entry.normalizedPath == CodexProfile.defaultNormalizedPath ? CodexProfile.defaultRelativePath : entry.normalizedPath
+            }
         }
         return CodexProfile.settingsDetail(
             entry: entry,

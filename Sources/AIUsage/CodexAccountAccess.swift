@@ -25,7 +25,9 @@ final class CodexAccountAccess: @unchecked Sendable {
 
     /// Called only with the directory returned by the system open panel.
     func select(_ url: URL) throws -> String {
-        let path = CodexProfile.normalizedPath(url.path)
+        let path = ProfileFolderIdentity.canonicalPath(
+            CodexProfile.normalizedPath(url.path), defaultPath: CodexProfile.defaultNormalizedPath, defaultFolderName: ".codex"
+        )
         guard bookmarks.start(url) else { throw ProviderFolderAccess.AccessError.unavailable }
         defer { bookmarks.stop(url) }
         let auth = url.appendingPathComponent(CodexProfile.authFileName)

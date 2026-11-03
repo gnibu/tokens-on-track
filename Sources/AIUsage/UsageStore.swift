@@ -463,10 +463,10 @@ final class UsageStore: ObservableObject {
     }
 
     @discardableResult
-    func saveOpenRouterKey(_ key: String) async -> Bool {
+    func saveOpenRouterKey(_ key: String) -> Bool {
         let saved = OpenRouterKeychain.save(key)
         hasSavedOpenRouterKey = OpenRouterKeychain.read() != nil
-        if saved { await refresh() }
+        if saved { connectionsChanged() }
         return saved
     }
 
@@ -479,10 +479,10 @@ final class UsageStore: ObservableObject {
     }
 
     @discardableResult
-    func saveOpenCodeGoKey(_ key: String) async -> Bool {
+    func saveOpenCodeGoKey(_ key: String) -> Bool {
         let saved = OpenCodeGoKeychain.save(key)
         hasSavedOpenCodeGoKey = OpenCodeGoKeychain.read() != nil
-        if saved { await refresh() }
+        if saved { connectionsChanged() }
         return saved
     }
 
@@ -502,10 +502,10 @@ final class UsageStore: ObservableObject {
     }
 
     @discardableResult
-    func saveCursorKey(_ key: String) async -> Bool {
+    func saveCursorKey(_ key: String) -> Bool {
         let saved = CursorKeychain.save(key)
         hasSavedCursorKey = CursorKeychain.read() != nil
-        if saved { await refresh() }
+        if saved { connectionsChanged() }
         return saved
     }
 

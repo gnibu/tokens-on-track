@@ -20,7 +20,6 @@ final class MenuBarItem {
     private var watches: Set<AnyCancellable> = []
     private var monitors: [Any] = []
     private var activationObserver: NSObjectProtocol?
-    private var isPresentingModalPanel = false
 
     /// Clear of the menu bar, and clear of the shadow the panel casts upwards.
     private let dropGap: CGFloat = 6
@@ -62,8 +61,7 @@ final class MenuBarItem {
         let content = PanelView()
             .environmentObject(UsageStore.shared)
         let hosting = NSHostingController(rootView: content)
-        // The panel is two tabs of different heights, and the settings one
-        // grows as the list does.
+        // Usage can grow when another account or quota window appears.
         hosting.sizingOptions = [.preferredContentSize]
 
         let panel = DropdownPanel(
@@ -125,22 +123,12 @@ final class MenuBarItem {
         item?.button?.highlight(true)
     }
 
-    /// Keep Settings alive while its system folder chooser takes focus.
-    func performModalPanel(_ action: () -> Void) {
-        isPresentingModalPanel = true
-        let previousLevel = panel?.level
-        panel?.level = .normal
-        defer {
-            isPresentingModalPanel = false
-            if let previousLevel { panel?.level = previousLevel }
-            panel?.makeKeyAndOrderFront(nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        action()
+    func showSettings() {
+        close()
+        SettingsWindow.shared.show()
     }
 
     private func close() {
-        guard !isPresentingModalPanel else { return }
         if let activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
@@ -172,8 +160,7 @@ final class MenuBarItem {
 
 // --------------------------------------------------------------------- //
 
-/// A borderless panel refuses key by default, which would leave the settings
-/// tab's switches and sliders dead to the keyboard and the first click.
+/// Usage actions in the borderless dropdown must accept keyboard focus.
 private final class DropdownPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }

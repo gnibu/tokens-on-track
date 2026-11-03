@@ -50,6 +50,18 @@ enum ClaudeProfile {
         normalizedPath(defaultRelativePath)
     }
 
+    /// Token-only accounts reserve an identity beneath the app's accounts directory.
+    static func isTokenOnlyPath(_ path: String, stateDirectory: URL) -> Bool {
+        let url = URL(fileURLWithPath: normalizedPath(path))
+        return url.deletingLastPathComponent().path == stateDirectory.appendingPathComponent("accounts").path
+            && UUID(uuidString: url.lastPathComponent) != nil
+    }
+
+    static func tokenAccountLabel(_ label: String?) -> String {
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Claude" : trimmed
+    }
+
     static func normalizedPath(_ raw: String) -> String {
         let expanded = (raw as NSString).expandingTildeInPath
         let absolute: String
@@ -194,7 +206,8 @@ enum ClaudeProfile {
     ) -> String {
         if hasCredential { return entry.normalizedPath }
         if appStore {
-            return "\(entry.normalizedPath) — add this profile folder below, then run Claude Code with CLAUDE_CONFIG_DIR set to sign in."
+            let path = entry.normalizedPath == defaultNormalizedPath ? defaultRelativePath : entry.normalizedPath
+            return "\(path) — sign in with Claude Code using this profile; its login is read from Keychain."
         }
         return "\(entry.normalizedPath) — run Claude Code with CLAUDE_CONFIG_DIR=\(entry.normalizedPath) and sign in."
     }
