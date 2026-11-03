@@ -194,7 +194,7 @@ enum ClaudeProfile {
     ) -> String {
         if hasCredential { return entry.normalizedPath }
         if appStore {
-            return "\(entry.normalizedPath) — add this profile folder below, then run Claude Code with CLAUDE_CONFIG_DIR set to sign in."
+            return "\(entry.normalizedPath) — choose this profile folder, then run Claude Code with CLAUDE_CONFIG_DIR set to sign in."
         }
         return "\(entry.normalizedPath) — run Claude Code with CLAUDE_CONFIG_DIR=\(entry.normalizedPath) and sign in."
     }

@@ -22,6 +22,11 @@ enum AIUsageApp {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated { MenuBarItem.shared.showSettings() }
+        return false
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock tile, no menu bar of its own — LSUIElement covers this too,
         // but setting it here keeps an unbundled debug run honest.
@@ -37,10 +42,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// A menu bar carrying only an Edit menu. `.accessory` apps show no menu
-    /// bar, but the items' key equivalents still drive standard editing
-    /// shortcuts in the responder chain.
+    @objc private func openSettings(_ sender: Any?) {
+        MainActor.assumeIsolated { MenuBarItem.shared.showSettings() }
+    }
+
+    /// Accessory apps still use menu key equivalents for settings, editing,
+    /// and closing a regular window, even without a visible app menu bar.
     private static func makeMainMenu() -> NSMenu {
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Tokens on Track", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
@@ -55,7 +70,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = editMenu
 
         let mainMenu = NSMenu()
+        mainMenu.addItem(appItem)
         mainMenu.addItem(editItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
         return mainMenu
     }
 }

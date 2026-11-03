@@ -177,7 +177,7 @@ enum CodexProfile {
     static func settingsDetail(entry: Entry, hasCredential: Bool, appStore: Bool) -> String {
         if hasCredential { return entry.normalizedPath }
         if appStore {
-            return "\(entry.normalizedPath) — add this profile folder below, then run Codex with CODEX_HOME set to sign in."
+            return "\(entry.normalizedPath) — choose this profile folder, then run Codex with CODEX_HOME set to sign in."
         }
         return "\(entry.normalizedPath) — run Codex with CODEX_HOME=\(entry.normalizedPath) and sign in."
     }

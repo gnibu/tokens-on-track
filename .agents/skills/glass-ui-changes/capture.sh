@@ -54,7 +54,7 @@ trap 'kill %1 2>/dev/null || true' EXIT
 # this also works when its level is set to Floating.
 # Fields are: id x y w h layer onscreen.
 panel_id()    { "$WINS" "$PID" | awk '$6=="layer=101" && $7=="onscreen=true" {print $1}'; }
-panel_origin(){ "$WINS" "$PID" | awk '$6=="layer=101" && $7=="onscreen=true" {print $2, $3}'; }
+settings_id() { "$WINS" "$PID" | awk '$4>=900 && $6=="layer=0" && $7=="onscreen=true" {print $1; exit}'; }
 card_id()     { "$WINS" "$PID" | awk '$4==460 && $7=="onscreen=true" {print $1}'; }
 
 shot() { screencapture -x -l "$1" -o -t png "$2" && echo "    $2  $(file -b "$2" | cut -d, -f2 | tr -d ' ')"; }
@@ -82,10 +82,9 @@ screencapture -x -R"$((IX - 8)),${IY},$((IW + 16)),${IH}" -t png "${OUT}/menubar
 echo "    ${OUT}/menubar.png  $(file -b "${OUT}/menubar.png" | cut -d, -f2 | tr -d ' ')"
 
 # --------------------------------------------------------------------- #
-# 2. Dropdown, both tabs
+# 2. Usage dropdown and separate Settings window
 #
-# `screencapture -l` does not steal focus, so the panel survives being
-# photographed and the Settings tab can be clicked without reopening it.
+# `screencapture -l` captures each window without including overlapping apps.
 # --------------------------------------------------------------------- #
 echo "==> dropdown"
 [ -n "$(panel_id)" ] || "$CLICK" "$((IX + IW / 2))" "$((IY + IH / 2))"
@@ -94,30 +93,13 @@ PANEL="$(panel_id)"
 [ -n "$PANEL" ] || fail 'the dropdown did not open. See SKILL.md step 2.'
 shot "$PANEL" "${OUT}/dropdown-usage.png"
 
-# The Settings tab centre, measured off dropdown-usage.png: (155, 30) from the
-# panel's own top-left.
-#
-# That origin comes from CGWindow, not AX. `window 1` is not dependable here —
-# with the panel open, AX has been seen returning both windows on one call and
-# only the desktop card on the next, at which point (155, 30) is measured from
-# the card on another display and the click lands on the desktop.
-set -- $(panel_origin)
-FX="$1"; FY="$2"
-"$CLICK" "$((FX + 155))" "$((FY + 30))"
+# The dropdown is key, so the app's Settings keyboard shortcut opens the
+# regular window without relying on a hard-coded gear position.
+osascript -e "tell application \"System Events\" to tell (first process whose unix id is ${PID}) to keystroke \",\" using command down"
 sleep 1
-PANEL="$(panel_id)"
-[ -n "$PANEL" ] || fail 'the Settings tab click closed the dropdown.
-       Re-measure the tab centre against docs/screenshots/dropdown-usage.png.'
-shot "$PANEL" "${OUT}/dropdown-settings.png"
-# Settings is a taller pane than Usage. Same height means the tab was
-# missed and this is the Usage tab wearing the wrong filename.
-H=$(sips -g pixelHeight "${OUT}/dropdown-settings.png" | awk '/pixelHeight/{print $2}')
-UH=$(sips -g pixelHeight "${OUT}/dropdown-usage.png" | awk '/pixelHeight/{print $2}')
-[ "$H" != "$UH" ] || fail "Settings tab click missed — captured the Usage tab again.
-       Re-measure the tab centre against ${OUT}/dropdown-usage.png."
-
-# TODO: the Working hours group sits below the fold and needs a scroll before it
-# can be captured. Not automated yet.
+SETTINGS="$(settings_id)"
+[ -n "$SETTINGS" ] || fail 'the Settings window did not open.'
+shot "$SETTINGS" "${OUT}/settings-window.png"
 
 # --------------------------------------------------------------------- #
 # 3. Desktop card
@@ -127,7 +109,7 @@ CARD="$(card_id)"
 if [ -n "$CARD" ]; then
     shot "$CARD" "${OUT}/desktop-card.png"
 else
-    echo "    not visible — enable it in Settings > Display > Card on desktop"
+    echo "    not visible — enable it in Settings > Appearance > Card on desktop"
 fi
 
 # Leave the panel closed.

@@ -148,9 +148,8 @@ python3 scripts/store-screenshots.py .context/shots docs/app-store-screenshots
 `AI_USAGE_FROZEN` stops all polling, so only the sample data is shown. Saved
 budgets still apply. Restore the preferences and relaunch normally afterwards.
 
-Shots 2 and 3 crop the Alerts and Working hours groups out of
-`.context/shots/settings-full.png`, the whole Settings tab in one window. The
-panel scrolls, so capture it from a throwaway build whose `cap` in
-`PanelView.swift` returns 4000, then reinstall the normal build. The notification
-banners in shot 2 are drawn by the script, using the exact text `Notifier.swift`
-posts.
+Settings now opens in its own window. The capture helper writes
+`.context/shots/settings-window.png` for its Accounts section. For the listing's
+Alerts and Working hours images, capture those sidebar sections individually;
+the old `SettingsTab`/`cap` workaround no longer applies. The notification banners
+in shot 2 are drawn by the script, using the exact text `Notifier.swift` posts.

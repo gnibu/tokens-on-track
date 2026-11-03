@@ -80,13 +80,13 @@ Claude at the cost of bumping a window that really is busier. The window's
 initial sits in the hole of the ring (`w` week, `h` 5-hour), which is the one
 place a menu bar has room to spare. Click it for the dropdown.
 
-**Dropdown.** Two tabs on a pane of glass. *Usage* leads with one line saying
+**Dropdown.** Usage on a pane of glass, with one line saying
 whether you are fine — "On target everywhere", or how far above the target
-the worst window is — then a row per window, with a **Refresh** button beside
-the tabs. *Settings* holds everything else, so opening it can no longer push the
-reading off the bottom of the screen.
+the worst window is — then a row per window. **Refresh** updates the reading;
+the **gear** opens a separate, resizable Settings window. Quit is available
+at the bottom of the dropdown.
 
-<img src="docs/screenshots/dropdown-usage.png" width="430" alt="The dropdown on the Usage tab: On target everywhere, with a row for each Claude and Codex window.">
+<img src="docs/screenshots/dropdown-usage.png" width="430" alt="Usage rows for Claude and Codex; this capture shows the previous dropdown header.">
 
 Claude and Codex accounts with saved usage resets show a small ↺ count beside
 the plan. Click it to see the details and confirm before using one. Claude
@@ -121,17 +121,29 @@ choose **System Settings → Notifications → Tokens on Track → Persistent**
 macOS controls this presentation preference. Notifications also appear while
 the app's dropdown is open.
 
-The Settings tab groups them the way System Settings does: *Menu bar* (which
-parts to draw, how many windows), *Display* (whether percentages show *Used* or
-*Vs target*, desktop card on/off, its layer, open at login), *OpenCode Go*
-(connection and optional API key), *OpenRouter*
-(connection, optional API key, one monthly USD budget, and optional dollar
-details), *Cursor* (connection, optional API key or session token, an optional
-monthly budget for team Admin keys, and optional dollar details), *Working hours*
-(selected days and one shared time range), *Alerts* (both thresholds, on
-sliders rather than steppers), and *Refresh* (5, 15, 30 or 60 minutes).
+**Settings.** The sidebar has *General* (open at login and refresh interval),
+*Appearance* (menu bar, percentages and desktop card), *Accounts*, *Working hours*,
+*Alerts*, *Agents*, and *About & help*. The window remembers its size and position.
+Reopening the app while it is running also brings Settings forward; **⌘,** opens
+it while the app has focus.
 
-<img src="docs/screenshots/dropdown-settings.png" width="430" alt="The Settings tab, showing the Menu bar and Display groups.">
+Under **Accounts**, select an account in the list to manage its connection and
+visibility beside it. Claude and Codex profiles can be renamed and removed.
+Provider-specific controls, including OpenRouter and Cursor budgets, stay with
+the selected account.
+
+**Add account** accepts a Claude Code or Codex profile folder, a Claude setup
+token, or an OpenCode Go, OpenRouter or Cursor key. Claude setup tokens can be
+added as separate named accounts without a profile folder. Other key providers
+support one saved key connection each; adding another replaces that provider’s
+saved key, which the dialog states before saving.
+
+**Detect accounts** lists local Claude Code and Codex profile folders, including
+profiles found in running CLI sessions. Select new profiles to add; existing
+ones are marked *Already added*. A folder being found does not guarantee its
+login is valid; check the connection status after adding it. The App Store
+edition provides folder choosers instead of scanning processes and folders.
+Other providers keep their existing automatic detection on usage refresh.
 
 Screenshots are captured by `.agents/skills/glass-ui-changes/capture.sh`.
 
@@ -254,13 +266,13 @@ Worth understanding before running something that touches your API credentials.
 
 - For a second Claude subscription, create another Claude Code profile with
   `CLAUDE_CONFIG_DIR` pointing at a separate folder, sign into it once, then add
-  that folder under **Claude accounts** in Settings. Profile paths are stored
+  that folder under **Settings → Accounts → Add account → Claude**. Profile paths are stored
   locally; OAuth tokens stay in Claude Code's Keychain items. The direct-download
   build may also notice a running Claude Code process and remember its profile
   after a valid credential is seen.
 - For a second Codex subscription, launch Codex with a separate home, for
   example `CODEX_HOME=~/.codex-work codex`, and sign in there once. Add that
-  folder under **Codex accounts** in Settings. The direct-download build can
+  folder under **Settings → Accounts → Add account → Codex**. The direct-download build can
   also notice a running Codex process with `CODEX_HOME` set; the App Store build
   only reads folders you explicitly choose. Tokens remain in each profile's
   `auth.json`.
@@ -275,7 +287,7 @@ Worth understanding before running something that touches your API credentials.
   the app quits or Cursor calls it stale. macOS names the reader `security` in
   that prompt. Clicking **Deny** on a prompt for another app's
   item (Claude Code, Cursor, Conductor) is remembered, even after a relaunch;
-  **Settings → Keychain → Ask again** lets macOS ask once more.
+  **Settings → Accounts → select an account → Keychain → Ask again** lets macOS ask once more.
 - Conductor's OpenCode Go, OpenRouter, or Cursor key is available only inside its managed
   process. While that process is running, the app can read its same-user process
   environment as a best-effort fallback; it never copies that key into storage.
@@ -342,7 +354,7 @@ token when it next runs, so the copy this app reads out of their store lapses on
 its own — overnight, typically. Start the relevant CLI once and the next fetch
 recovers. By design this app never refreshes tokens itself — it will not touch
 your logins. To avoid this for Claude, run `claude setup-token` and add the token
-under **Claude accounts** in Settings.
+under **Settings → Accounts → Add account → Claude → Setup token**.
 
 Until it recovers, the rows carry the last reading that did land, dimmed and
 marked *stale*, with the notice saying when it was taken. They are dropped once

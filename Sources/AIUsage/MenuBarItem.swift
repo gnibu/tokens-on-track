@@ -62,8 +62,7 @@ final class MenuBarItem {
         let content = PanelView()
             .environmentObject(UsageStore.shared)
         let hosting = NSHostingController(rootView: content)
-        // The panel is two tabs of different heights, and the settings one
-        // grows as the list does.
+        // Usage can grow when another account or quota window appears.
         hosting.sizingOptions = [.preferredContentSize]
 
         let panel = DropdownPanel(
@@ -125,7 +124,12 @@ final class MenuBarItem {
         item?.button?.highlight(true)
     }
 
-    /// Keep Settings alive while its system folder chooser takes focus.
+    func showSettings() {
+        close()
+        SettingsWindow.shared.show()
+    }
+
+    /// Keep the dropdown alive for any modal panel initiated from it.
     func performModalPanel(_ action: () -> Void) {
         isPresentingModalPanel = true
         let previousLevel = panel?.level
@@ -172,8 +176,7 @@ final class MenuBarItem {
 
 // --------------------------------------------------------------------- //
 
-/// A borderless panel refuses key by default, which would leave the settings
-/// tab's switches and sliders dead to the keyboard and the first click.
+/// Usage actions in the borderless dropdown must accept keyboard focus.
 private final class DropdownPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }

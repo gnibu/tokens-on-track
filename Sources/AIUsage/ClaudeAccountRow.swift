@@ -1,70 +1,6 @@
 import AppKit
 import SwiftUI
 
-struct ClaudeAccountsGroup: View {
-    @EnvironmentObject private var store: UsageStore
-    @ObservedObject private var preferences = Preferences.shared
-
-    var body: some View {
-        Group {
-            groupTitle("Claude accounts")
-            DividedRows {
-                ForEach(entries) { entry in
-                    ClaudeAccountRow(entry: entry, report: store.report)
-                }
-                addRow
-            }
-        }
-    }
-
-    private var entries: [ClaudeProfile.Entry] {
-        preferences.claudeSettingsEntries(discoveredPaths: store.discoveredClaudePaths)
-    }
-
-    private var addRow: some View {
-        HStack {
-            Text("Add profile folder")
-                .font(.system(size: 13))
-            Spacer()
-            GlassButton(label: "Choose folder…") { chooseFolder() }
-        }
-    }
-
-    private func chooseFolder() {
-        MenuBarItem.shared.performModalPanel {
-            let panel = NSOpenPanel()
-            panel.title = "Add Claude Code profile"
-            panel.message = "Select the folder used as CLAUDE_CONFIG_DIR for a second Claude Code login. Tokens on Track only reads the matching Keychain item; it never changes your login."
-            panel.prompt = "Add Profile"
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.canCreateDirectories = false
-            panel.allowsMultipleSelection = false
-            panel.showsHiddenFiles = true
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            #if APP_STORE
-            do {
-                let path = try ClaudeAccountAccess.shared.select(url)
-                preferences.addClaudeProfile(path: path)
-            } catch {
-                return
-            }
-            #else
-            preferences.addClaudeProfile(path: url.path)
-            #endif
-            store.connectionsChanged()
-        }
-    }
-
-    private func groupTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Glass.ink(0.42))
-            .textCase(.uppercase)
-            .padding(.bottom, 2)
-    }
-}
-
 /// Same controls as the OpenRouter key: the token is written straight to the
 /// app's Keychain item and the field never shows a saved value.
 private struct ClaudeSetupTokenField: View {
@@ -149,7 +85,7 @@ private struct ClaudeSetupTokenField: View {
     }
 }
 
-private struct ClaudeAccountRow: View {
+struct ClaudeAccountRow: View {
     let entry: ClaudeProfile.Entry
     let report: Report?
     @ObservedObject private var preferences = Preferences.shared
@@ -157,6 +93,8 @@ private struct ClaudeAccountRow: View {
     @State private var labelText: String = ""
     @State private var committedLabelText: String = ""
     @State private var removeError: String?
+    @State private var confirmingRemoval = false
+    @State private var hasSetupToken = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -166,13 +104,27 @@ private struct ClaudeAccountRow: View {
                 hasChanges: labelText != committedLabelText,
                 onCommit: commitLabel
             )
-            .onAppear { syncLabel() }
+            .onAppear {
+                syncLabel()
+                hasSetupToken = ClaudeSetupTokenKeychain.read(account: entry.id) != nil
+            }
             Text(removeError ?? statusLine)
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
             ClaudeSetupTokenField(account: entry.id)
-            GlassLink(title: "Remove") {
+            #if APP_STORE
+            if !hasSetupToken {
+                GlassButton(label: "Choose folder again…", systemImage: "folder") { reconnectFolder() }
+            }
+            #endif
+            GlassLink(title: "Remove account…") { confirmingRemoval = true }
+        }
+        .onChange(of: store.isRefreshing) { _, refreshing in
+            if !refreshing { hasSetupToken = ClaudeSetupTokenKeychain.read(account: entry.id) != nil }
+        }
+        .confirmationDialog("Remove this account from Tokens on Track?", isPresented: $confirmingRemoval) {
+            Button("Remove account", role: .destructive) {
                 guard ClaudeSetupTokenKeychain.remove(account: entry.id) else {
                     removeError = "Could not remove the token from Keychain"
                     return
@@ -180,6 +132,9 @@ private struct ClaudeAccountRow: View {
                 preferences.removeClaudeProfile(path: entry.normalizedPath)
                 store.connectionsChanged()
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its saved setup token, if any, is removed from this app. Your Claude Code login is unchanged.")
         }
     }
 
@@ -197,12 +152,23 @@ private struct ClaudeAccountRow: View {
             if let error = provider.error, !provider.ok {
                 return error
             }
-            if provider.loggedIn, provider.ok {
+            if provider.loggedIn, provider.ok, !hasSetupToken {
                 return entry.normalizedPath
             }
         }
+        if hasSetupToken { return "Setup token saved in this Mac’s Keychain" }
         let hasCredential = liveProvider?.loggedIn == true
         return ClaudeProfile.settingsDetail(entry: entry, hasCredential: hasCredential, appStore: appStore)
+    }
+
+    private func reconnectFolder() {
+        guard let url = AccountFolderPicker.choose(for: .claude) else { return }
+        do {
+            let path = try AccountFolderPicker.save(url, for: .claude)
+            preferences.addClaudeProfile(path: path)
+            removeError = nil
+            store.connectionsChanged()
+        } catch { removeError = error.localizedDescription }
     }
 
     private func syncLabel() {
