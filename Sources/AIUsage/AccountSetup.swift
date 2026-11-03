@@ -30,7 +30,13 @@ enum AccountFolderPicker {
     }
 
     @MainActor
-    static func save(_ url: URL, for provider: AccountProvider) throws -> String {
+    static func save(_ url: URL, for provider: AccountProvider, expectedPath: String? = nil) throws -> String {
+        let path = ProfileFolderIdentity.canonicalPath(
+            ClaudeProfile.normalizedPath(url.path),
+            defaultPath: provider == .codex ? CodexProfile.defaultNormalizedPath : ClaudeProfile.defaultNormalizedPath,
+            defaultFolderName: provider == .codex ? ".codex" : ".claude"
+        )
+        try ProfileFolderIdentity.validate(path, expectedPath: expectedPath)
         #if APP_STORE
         return try provider == .codex
             ? CodexAccountAccess.shared.select(url)
@@ -40,7 +46,7 @@ enum AccountFolderPicker {
            !FileManager.default.isReadableFile(atPath: url.appendingPathComponent("auth.json").path) {
             throw ProviderFolderAccess.AccessError.wrongFolder("auth.json")
         }
-        return ClaudeProfile.normalizedPath(url.path)
+        return path
         #endif
     }
 }
@@ -55,7 +61,6 @@ struct AddAccountSheet: View {
     @State private var nickname = ""
     @State private var credential = ""
     @State private var error: String?
-    @State private var saving = false
 
     private var usesFolder: Bool {
         provider == .codex || (provider == .claude && !useSetupToken)
@@ -123,15 +128,12 @@ struct AddAccountSheet: View {
                 Button(hasSavedKey ? "Replace key" : "Add account") { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!ready)
-                if saving { ProgressView().controlSize(.small) }
             }
         }
         .padding(28)
         .frame(width: 460)
         .background(Color(white: 0.17))
         .environment(\.colorScheme, .dark)
-        .disabled(saving)
-        .interactiveDismissDisabled(saving)
         .onDisappear { credential = "" }
     }
 
@@ -185,27 +187,13 @@ struct AddAccountSheet: View {
     }
 
     private func save() {
-        guard ready, !saving else { return }
+        guard ready else { return }
         error = nil
         let preferences = Preferences.shared
         if usesFolder, let folder {
             do {
                 let path = try AccountFolderPicker.save(folder, for: provider)
-                let id: String
-                if provider == .claude {
-                    preferences.addClaudeProfile(path: path)
-                    if !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        preferences.setClaudeLabel(nickname, for: path)
-                    }
-                    id = ClaudeProfile.keychainService(for: path)
-                } else {
-                    preferences.addCodexProfile(path: path)
-                    if !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        preferences.setCodexLabel(nickname, for: path)
-                    }
-                    id = CodexProfile.providerID(for: path)
-                }
-                finish(id)
+                finish(DetectedAccount(provider: provider, path: path).add(label: nickname))
             } catch {
                 self.error = error.localizedDescription
             }
@@ -221,38 +209,34 @@ struct AddAccountSheet: View {
                 return
             }
             preferences.addClaudeProfile(path: path)
-            preferences.setClaudeLabel(nickname.isEmpty ? "Claude" : nickname, for: path)
+            preferences.setClaudeLabel(ClaudeProfile.tokenAccountLabel(nickname), for: path)
             finish(id)
             return
         }
-        saving = true
-        Task { @MainActor in
-            let saved: Bool
-            let id: String
-            switch provider {
-            case .openCodeGo:
-                id = Fetcher.openCodeGoID
-                saved = await store.saveOpenCodeGoKey(credential)
-            case .openRouter:
-                id = Fetcher.openRouterID
-                saved = await store.saveOpenRouterKey(credential)
-            case .cursor:
-                id = Fetcher.cursorID
-                saved = await store.saveCursorKey(credential)
-            default:
-                saved = false
-                id = ""
-            }
-            saving = false
-            if saved { finish(id) }
-            else { error = "Could not save the key in Keychain" }
+        let saved: Bool
+        let id: String
+        switch provider {
+        case .openCodeGo:
+            id = Fetcher.openCodeGoID
+            saved = store.saveOpenCodeGoKey(credential)
+        case .openRouter:
+            id = Fetcher.openRouterID
+            saved = store.saveOpenRouterKey(credential)
+        case .cursor:
+            id = Fetcher.cursorID
+            saved = store.saveCursorKey(credential)
+        default:
+            saved = false
+            id = ""
         }
+        if saved { finish(id, refresh: false) }
+        else { error = "Could not save the key in Keychain" }
     }
 
-    private func finish(_ id: String) {
+    private func finish(_ id: String, refresh: Bool = true) {
         credential = ""
         onAdded(id)
-        store.connectionsChanged()
+        if refresh { store.connectionsChanged() }
         dismiss()
     }
 }
@@ -263,10 +247,27 @@ struct DetectedAccount: Identifiable {
     var id: String {
         provider == .claude ? ClaudeProfile.keychainService(for: path) : CodexProfile.providerID(for: path)
     }
+
+    @MainActor
+    func add(label: String? = nil) -> String {
+        let preferences = Preferences.shared
+        let label = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider == .claude {
+            preferences.addClaudeProfile(path: path)
+            if let label, !label.isEmpty { preferences.setClaudeLabel(label, for: path) }
+        } else {
+            preferences.addCodexProfile(path: path)
+            if let label, !label.isEmpty { preferences.setCodexLabel(label, for: path) }
+        }
+        return id
+    }
 }
 
 /// Enumerate candidate folders without reading login secrets or changing settings.
 enum AccountDiscovery {
+    static func preselectedIDs(_ candidates: [DetectedAccount], existingIDs: Set<String>, ignoredIDs: Set<String>) -> Set<String> {
+        Set(candidates.map(\.id)).subtracting(existingIDs).subtracting(ignoredIDs)
+    }
     static func profiles(claudePaths: [String], codexPaths: [String]) -> [DetectedAccount] {
         let claude = Set(claudePaths.map(ClaudeProfile.normalizedPath)).sorted().filter { path in
             var directory: ObjCBool = false
@@ -367,10 +368,8 @@ struct DetectAccountsSheet: View {
         guard let url = AccountFolderPicker.choose(for: provider) else { return }
         do {
             let path = try AccountFolderPicker.save(url, for: provider)
-            if provider == .claude { Preferences.shared.addClaudeProfile(path: path) }
-            else { Preferences.shared.addCodexProfile(path: path) }
             let candidate = DetectedAccount(provider: provider, path: path)
-            onAdded(candidate.id)
+            onAdded(candidate.add())
             store.connectionsChanged()
             dismiss()
         } catch { folderError = error.localizedDescription }
@@ -383,6 +382,8 @@ struct DetectAccountsSheet: View {
             + Array(preferences.claudeIgnoredPaths) + store.discoveredClaudePaths
         let knownCodex = preferences.codexConfiguredPaths + Array(preferences.codexRememberedPaths)
             + Array(preferences.codexIgnoredPaths) + store.discoveredCodexPaths
+        let ignoredIDs = Set(preferences.claudeIgnoredPaths.map(ClaudeProfile.keychainService))
+            .union(preferences.codexIgnoredPaths.map(CodexProfile.providerID))
         let result = await Task.detached(priority: .utility) {
             AccountDiscovery.profiles(
                 claudePaths: [ClaudeProfile.defaultNormalizedPath] + knownClaude + Fetcher.discoveredClaudeConfigDirs(),
@@ -391,16 +392,14 @@ struct DetectAccountsSheet: View {
         }.value
         guard !Task.isCancelled else { return }
         candidates = result
-        selected = Set(result.map(\.id)).subtracting(existingIDs)
+        selected = AccountDiscovery.preselectedIDs(result, existingIDs: existingIDs, ignoredIDs: ignoredIDs)
         #endif
         scanning = false
     }
 
     private func addSelected() {
         for candidate in candidates where selected.contains(candidate.id) {
-            if candidate.provider == .claude { Preferences.shared.addClaudeProfile(path: candidate.path) }
-            else { Preferences.shared.addCodexProfile(path: candidate.path) }
-            onAdded(candidate.id)
+            onAdded(candidate.add())
         }
         store.connectionsChanged()
         dismiss()

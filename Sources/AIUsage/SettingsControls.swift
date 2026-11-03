@@ -439,14 +439,12 @@ struct SettingsControls: View {
 
     private func saveOpenCodeGoKey() {
         let key = openCodeGoKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            if await store.saveOpenCodeGoKey(key) {
-                editingOpenCodeGoKey = false
-                openCodeGoKey = ""
-                openCodeGoKeyError = nil
-            } else {
-                openCodeGoKeyError = "Could not save the key in Keychain"
-            }
+        if store.saveOpenCodeGoKey(key) {
+            editingOpenCodeGoKey = false
+            openCodeGoKey = ""
+            openCodeGoKeyError = nil
+        } else {
+            openCodeGoKeyError = "Could not save the key in Keychain"
         }
     }
 
@@ -488,14 +486,12 @@ struct SettingsControls: View {
 
     private func saveOpenRouterKey() {
         let key = openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            if await store.saveOpenRouterKey(key) {
-                editingOpenRouterKey = false
-                openRouterKey = ""
-                openRouterKeyError = nil
-            } else {
-                openRouterKeyError = "Could not save the key in Keychain"
-            }
+        if store.saveOpenRouterKey(key) {
+            editingOpenRouterKey = false
+            openRouterKey = ""
+            openRouterKeyError = nil
+        } else {
+            openRouterKeyError = "Could not save the key in Keychain"
         }
     }
 
@@ -686,14 +682,12 @@ struct SettingsControls: View {
 
     private func saveCursorKey() {
         let key = cursorKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            if await store.saveCursorKey(key) {
-                editingCursorKey = false
-                cursorKey = ""
-                cursorKeyError = nil
-            } else {
-                cursorKeyError = "Could not save the key in Keychain"
-            }
+        if store.saveCursorKey(key) {
+            editingCursorKey = false
+            cursorKey = ""
+            cursorKeyError = nil
+        } else {
+            cursorKeyError = "Could not save the key in Keychain"
         }
     }
 
@@ -713,9 +707,7 @@ struct SettingsControls: View {
         preferences.cursorMonthlyBudget = budget
     }
 
-    /// Show/hide each set-up provider and its model-specific rows. Only the
-    /// providers we actually have credentials for get a switch — there is no
-    /// sense offering to hide one that was never installed.
+    /// Visibility belongs to the selected account, including accounts awaiting setup.
     private func accountVisibility(_ id: String) -> some View {
         let models = preferences.knownModelLimits.filter { $0.provider == id }
         return DividedRows {
@@ -1125,6 +1117,3 @@ struct DividedRows<Content: View>: View {
         }
     }
 }
-
-// --------------------------------------------------------------------- //
-

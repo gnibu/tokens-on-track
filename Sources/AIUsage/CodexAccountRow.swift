@@ -28,8 +28,8 @@ struct CodexAccountRow: View {
             GlassButton(label: "Choose folder again…", systemImage: "folder") {
                 guard let url = AccountFolderPicker.choose(for: .codex) else { return }
                 do {
-                    let path = try AccountFolderPicker.save(url, for: .codex)
-                    preferences.addCodexProfile(path: path)
+                    let path = try AccountFolderPicker.save(url, for: .codex, expectedPath: entry.normalizedPath)
+                    _ = DetectedAccount(provider: .codex, path: path).add()
                     folderError = nil
                     store.connectionsChanged()
                 } catch { folderError = error.localizedDescription }
@@ -60,7 +60,9 @@ struct CodexAccountRow: View {
         #endif
         if let provider = liveProvider {
             if let error = provider.error, !provider.ok { return error }
-            if provider.loggedIn, provider.ok { return entry.normalizedPath }
+            if provider.loggedIn, provider.ok {
+                return entry.normalizedPath == CodexProfile.defaultNormalizedPath ? CodexProfile.defaultRelativePath : entry.normalizedPath
+            }
         }
         return CodexProfile.settingsDetail(
             entry: entry,

@@ -37,7 +37,9 @@ final class ClaudeAccountAccess: @unchecked Sendable {
 
     /// Called only with the directory returned by the system open panel.
     func select(_ url: URL) throws -> String {
-        let path = ClaudeProfile.normalizedPath(url.path)
+        let path = ProfileFolderIdentity.canonicalPath(
+            ClaudeProfile.normalizedPath(url.path), defaultPath: ClaudeProfile.defaultNormalizedPath, defaultFolderName: ".claude"
+        )
         guard bookmarks.start(url) else { throw ProviderFolderAccess.AccessError.unavailable }
         defer { bookmarks.stop(url) }
         var isDirectory: ObjCBool = false

@@ -76,6 +76,12 @@ published with generated notes on the
 
 ### Fixed
 
+- Settings distinguish carried stale readings from connected accounts, preserve
+  default profile identities when choosing folders in the App Store edition,
+  and reject reconnecting an account to another profile's folder.
+- Token-only Claude accounts keep a readable name and their only credential;
+  key entry returns immediately after saving and schedules one refresh.
+
 - Usage bars line up with their figures and keep their intended height. A live
   0% now shows in full ink and pace colour; only a carried reading is grey.
 - Cursor no longer raises a Keychain prompt for the Cursor app's token or

@@ -99,7 +99,38 @@ osascript -e "tell application \"System Events\" to tell (first process whose un
 sleep 1
 SETTINGS="$(settings_id)"
 [ -n "$SETTINGS" ] || fail 'the Settings window did not open.'
+# SwiftUI sidebar buttons expose their text as accessibility labels. Walk the
+# settings window's descendants rather than depending on screen coordinates.
+choose_section() {
+    osascript - "$PID" "$1" <<'APPLESCRIPT'
+on run argv
+    tell application "System Events"
+        tell (first process whose unix id is (item 1 of argv as integer))
+            set settingsWindow to first window whose title is "Tokens on Track Settings"
+            repeat with sidebarElement in (entire contents of settingsWindow)
+                try
+                    if role of sidebarElement is "AXButton" and name of sidebarElement is (item 2 of argv) then
+                        perform action "AXPress" of sidebarElement
+                        return
+                    end if
+                end try
+            end repeat
+            error "Settings sidebar section not found: " & (item 2 of argv)
+        end tell
+    end tell
+end run
+APPLESCRIPT
+    sleep 1
+}
+choose_section "Accounts"
 shot "$SETTINGS" "${OUT}/settings-window.png"
+choose_section "Alerts"
+shot "$SETTINGS" "${OUT}/settings-alerts.png"
+choose_section "Working hours"
+shot "$SETTINGS" "${OUT}/settings-working-hours.png"
+choose_section "Appearance"
+shot "$SETTINGS" "${OUT}/settings-appearance.png"
+choose_section "Accounts"
 
 # --------------------------------------------------------------------- #
 # 3. Desktop card

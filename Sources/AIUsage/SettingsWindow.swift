@@ -89,13 +89,14 @@ struct SettingsAccount: Identifiable {
 
     var status: String {
         guard let provider, provider.loggedIn else { return "Not connected" }
+        if provider.stale { return "Stale reading" }
         if provider.ok { return "Connected" }
-        return provider.stale ? "Stale reading" : "Needs attention"
+        return "Needs attention"
     }
 
     var statusColor: Color {
         guard let provider, provider.loggedIn else { return Glass.ink(0.35) }
-        return provider.ok ? Pace.good : Pace.warn
+        return provider.ok && !provider.stale ? Pace.good : Pace.warn
     }
 
     @MainActor
@@ -108,7 +109,8 @@ struct SettingsAccount: Identifiable {
             let provider = providers.first { $0.id == entry.id }
             return SettingsAccount(
                 id: entry.id, kind: "claude", brand: "Claude",
-                name: preferences.claudeLabel(for: entry.normalizedPath) ?? provider?.name
+                name: preferences.claudeLabel(for: entry.normalizedPath)
+                    ?? (ClaudeProfile.isTokenOnlyPath(entry.normalizedPath, stateDirectory: UsageStore.stateDirectory) ? "Claude" : provider?.name)
                     ?? ClaudeProfile.defaultLabel(subscriptionType: nil, customLabel: nil, profilePath: entry.normalizedPath),
                 provider: provider, connection: .claude(entry)
             )

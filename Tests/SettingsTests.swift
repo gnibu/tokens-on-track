@@ -9,6 +9,9 @@ enum SettingsTests {
         testDiscoveryFiltersAndDeduplicatesProfiles()
         testAccountConnectionStatuses()
         testAccountCatalogRetainsDisconnectedProviders()
+        testDefaultFolderIdentityAndReconnectValidation()
+        testTokenOnlyIdentityAndBlankLabels()
+        testRemovedProfilesAreNotPreselected()
     }
 
     private static func testWindowReopensWithoutLosingState() {
@@ -69,7 +72,9 @@ enum SettingsTests {
         provider.loggedIn = true
         check(account(provider).status == "Needs attention", "Rejected logins need actionable status")
         provider.stale = true
+        provider.ok = true
         check(account(provider).status == "Stale reading", "Carried readings must be identified")
+        check(account(provider).statusColor == Pace.warn, "A carried reading must not have a healthy connection color")
         provider.ok = true
         provider.stale = false
         check(account(provider).status == "Connected", "Successful accounts must show connected")
@@ -82,6 +87,46 @@ enum SettingsTests {
             check(account != nil && account?.status == "Not connected", "\(id) must remain configurable before login")
         }
         check(Set(catalog.map(\.id)).count == catalog.count, "Account list identities must be unique")
+    }
+
+    private static func testDefaultFolderIdentityAndReconnectValidation() {
+        for folder in [".claude", ".codex"] {
+            let canonical = "/Users/person/Library/Containers/app/Data/\(folder)"
+            let selected = ProfileFolderIdentity.canonicalPath(
+                "/Users/person/\(folder)", defaultPath: canonical,
+                defaultFolderName: folder, userHome: "/Users/person"
+            )
+            check(selected == canonical, "Real default folders must retain their default identity in a sandbox")
+            let custom = ProfileFolderIdentity.canonicalPath(
+                "/Users/person/work-profile", defaultPath: canonical,
+                defaultFolderName: folder, userHome: "/Users/person"
+            )
+            check(custom == "/Users/person/work-profile", "Custom profiles must keep separate identities")
+            do { try ProfileFolderIdentity.validate(selected, expectedPath: canonical) }
+            catch { fail("The same profile must be accepted for reauthorization") }
+            do {
+                try ProfileFolderIdentity.validate(custom, expectedPath: canonical)
+                fail("A reconnect must reject a different account's folder")
+            } catch {}
+        }
+    }
+
+    private static func testTokenOnlyIdentityAndBlankLabels() {
+        let root = URL(fileURLWithPath: "/fixture/state")
+        let tokenPath = root.appendingPathComponent("accounts/\(UUID().uuidString)").path
+        check(ClaudeProfile.isTokenOnlyPath(tokenPath, stateDirectory: root), "Standalone token accounts must be recognized without a folder")
+        check(!ClaudeProfile.isTokenOnlyPath("/fixture/.claude", stateDirectory: root), "CLI profiles must keep their folder-based connection")
+        check(!ClaudeProfile.isTokenOnlyPath(tokenPath, stateDirectory: URL(fileURLWithPath: "/other/state")), "Only this app's reserved identities are token-only")
+        check(ClaudeProfile.tokenAccountLabel(" \n ") == "Claude", "Blank token account labels must not expose the UUID")
+        check(ClaudeProfile.tokenAccountLabel(" Work ") == "Work", "Token account labels must be trimmed")
+    }
+
+    private static func testRemovedProfilesAreNotPreselected() {
+        let removed = DetectedAccount(provider: .claude, path: "/fixture/removed")
+        let existing = DetectedAccount(provider: .codex, path: "/fixture/existing")
+        let fresh = DetectedAccount(provider: .codex, path: "/fixture/fresh")
+        let selected = AccountDiscovery.preselectedIDs([removed, existing, fresh], existingIDs: [existing.id], ignoredIDs: [removed.id])
+        check(selected == [fresh.id], "Removed profiles must require a deliberate selection before being added again")
     }
 
     private static func check(_ condition: Bool, _ message: String) {

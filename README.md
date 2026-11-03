@@ -134,13 +134,15 @@ the selected account.
 
 **Add account** accepts a Claude Code or Codex profile folder, a Claude setup
 token, or an OpenCode Go, OpenRouter or Cursor key. Claude setup tokens can be
-added as separate named accounts without a profile folder. Other key providers
+added as separate named accounts without a profile folder; replace the token
+to reconnect, or remove the account to delete its saved token. Other key providers
 support one saved key connection each; adding another replaces that provider’s
 saved key, which the dialog states before saving.
 
 **Detect accounts** lists local Claude Code and Codex profile folders, including
 profiles found in running CLI sessions. Select new profiles to add; existing
-ones are marked *Already added*. A folder being found does not guarantee its
+ones are marked *Already added*, and previously removed profiles stay unticked
+until you select them. A folder being found does not guarantee its
 login is valid; check the connection status after adding it. The App Store
 edition provides folder choosers instead of scanning processes and folders.
 Other providers keep their existing automatic detection on usage refresh.

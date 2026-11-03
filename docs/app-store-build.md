@@ -148,8 +148,8 @@ python3 scripts/store-screenshots.py .context/shots docs/app-store-screenshots
 `AI_USAGE_FROZEN` stops all polling, so only the sample data is shown. Saved
 budgets still apply. Restore the preferences and relaunch normally afterwards.
 
-Settings now opens in its own window. The capture helper writes
-`.context/shots/settings-window.png` for its Accounts section. For the listing's
-Alerts and Working hours images, capture those sidebar sections individually;
-the old `SettingsTab`/`cap` workaround no longer applies. The notification banners
+The capture helper writes `settings-window.png` for Accounts and
+`settings-alerts.png`, `settings-working-hours.png` and `settings-appearance.png`
+for the listing compositor. No tall settings-panel capture or crop coordinates
+are required. The notification banners
 in shot 2 are drawn by the script, using the exact text `Notifier.swift` posts.

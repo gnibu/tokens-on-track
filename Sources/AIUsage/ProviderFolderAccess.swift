@@ -1,4 +1,40 @@
 import Foundation
+import Darwin
+
+/// The picker returns the real home, while sandbox ~ expansion names the container.
+enum ProfileFolderIdentity {
+    static var userHome: String {
+        var entry = passwd()
+        var result: UnsafeMutablePointer<passwd>?
+        let requested = sysconf(_SC_GETPW_R_SIZE_MAX)
+        var buffer = [CChar](repeating: 0, count: requested > 0 ? Int(requested) : 16384)
+        return buffer.withUnsafeMutableBufferPointer { storage in
+            guard getpwuid_r(getuid(), &entry, storage.baseAddress, storage.count, &result) == 0,
+                  result != nil, let home = entry.pw_dir else { return NSHomeDirectory() }
+            return String(cString: home)
+        }
+    }
+
+    static func canonicalPath(
+        _ path: String, defaultPath: String, defaultFolderName: String, userHome: String = userHome
+    ) -> String {
+        let realDefault = URL(fileURLWithPath: userHome).appendingPathComponent(defaultFolderName).path
+        return path == realDefault ? defaultPath : path
+    }
+
+    static func validate(_ path: String, expectedPath: String?) throws {
+        if let expectedPath, path != expectedPath { throw SelectionError.wrongProfile(expectedPath) }
+    }
+
+    private enum SelectionError: LocalizedError {
+        case wrongProfile(String)
+        var errorDescription: String? {
+            switch self {
+            case .wrongProfile(let path): return "Choose this account’s profile folder: \(path)"
+            }
+        }
+    }
+}
 
 enum ProviderFolder: String, CaseIterable {
     case codex, cursor

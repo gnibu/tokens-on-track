@@ -5,8 +5,8 @@
     python3 scripts/store-screenshots.py .context/shots docs/app-store-screenshots
 
 Needs Pillow. Captures come from capture.sh running against the sample cache
-written by scripts/sample-usage.py, plus settings-full.png: the whole Settings
-tab captured once with the panel's height cap lifted (see docs/app-store-build.md).
+written by scripts/sample-usage.py. The helper captures the separate Settings
+window on its Accounts, Alerts, Working hours and Appearance sections.
 """
 import os
 import sys
@@ -21,19 +21,19 @@ SHOTS = [
     ("dropdown-usage.png", None, "Know if your\nquota will last.",
      "Claude and Codex limit you per 5 hours and per week. The white tick shows "
      "where you should be now; green means you are on pace.", []),
-    ("settings-full.png", (0, 5560, 860, 6130), "Warned before\nyou hit the wall.",
+    ("settings-alerts.png", None, "Warned before\nyou hit the wall.",
      "Get an alert when a limit runs ahead of pace or passes your threshold, "
      "and when it resets.", [
          ("Claude week off track",
           "62% used; 38% remaining. 1.6× target (39% expected). Resets Tue 07:15."),
          ("Codex 5h limit reset", "Full quota available again."),
      ]),
-    ("settings-full.png", (0, 5072, 860, 5508), "Spread the week\nover your work days.",
+    ("settings-working-hours.png", None, "Spread the week\nover your work days.",
      "Working hours spread each quota across the days and hours you choose, "
      "so your target follows your real working week.", []),
     ("desktop-card.png", None, "Your quotas,\nright on the desktop.",
      "An optional card sits behind your windows and keeps every limit in view.", []),
-    ("dropdown-settings.png", (0, 0, 860, 1320), "Make it yours.",
+    ("settings-appearance.png", None, "Make it yours.",
      "Choose what the menu bar shows and whether a card stays on your desktop.", []),
 ]
 ICON = os.path.join(os.path.dirname(__file__), "..", "Resources", "AppIcon.png")

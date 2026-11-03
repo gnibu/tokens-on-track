@@ -20,7 +20,6 @@ final class MenuBarItem {
     private var watches: Set<AnyCancellable> = []
     private var monitors: [Any] = []
     private var activationObserver: NSObjectProtocol?
-    private var isPresentingModalPanel = false
 
     /// Clear of the menu bar, and clear of the shadow the panel casts upwards.
     private let dropGap: CGFloat = 6
@@ -129,22 +128,7 @@ final class MenuBarItem {
         SettingsWindow.shared.show()
     }
 
-    /// Keep the dropdown alive for any modal panel initiated from it.
-    func performModalPanel(_ action: () -> Void) {
-        isPresentingModalPanel = true
-        let previousLevel = panel?.level
-        panel?.level = .normal
-        defer {
-            isPresentingModalPanel = false
-            if let previousLevel { panel?.level = previousLevel }
-            panel?.makeKeyAndOrderFront(nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        action()
-    }
-
     private func close() {
-        guard !isPresentingModalPanel else { return }
         if let activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil

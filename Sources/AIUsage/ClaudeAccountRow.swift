@@ -5,6 +5,8 @@ import SwiftUI
 /// app's Keychain item and the field never shows a saved value.
 private struct ClaudeSetupTokenField: View {
     let account: String
+    var allowsRemoval = true
+    var onTokenChanged: (Bool) -> Void = { _ in }
     @EnvironmentObject private var store: UsageStore
     @State private var hasToken = false
     @State private var editing = false
@@ -43,7 +45,7 @@ private struct ClaudeSetupTokenField: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    if hasToken {
+                    if hasToken && allowsRemoval {
                         GlassLink(title: "Remove") { remove() }
                     }
                     GlassButton(label: hasToken ? "Replace…" : "Add token…") {
@@ -53,7 +55,10 @@ private struct ClaudeSetupTokenField: View {
                 }
             }
         }
-        .onAppear { hasToken = ClaudeSetupTokenKeychain.read(account: account) != nil }
+        .onAppear {
+            hasToken = ClaudeSetupTokenKeychain.read(account: account) != nil
+            onTokenChanged(hasToken)
+        }
     }
 
     private var subtitle: String {
@@ -68,6 +73,7 @@ private struct ClaudeSetupTokenField: View {
             return
         }
         hasToken = true
+        onTokenChanged(true)
         editing = false
         token = ""
         error = nil
@@ -80,6 +86,7 @@ private struct ClaudeSetupTokenField: View {
             return
         }
         hasToken = false
+        onTokenChanged(false)
         error = nil
         store.connectionsChanged()
     }
@@ -112,12 +119,7 @@ struct ClaudeAccountRow: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Glass.ink(0.62))
                 .fixedSize(horizontal: false, vertical: true)
-            ClaudeSetupTokenField(account: entry.id)
-            #if APP_STORE
-            if !hasSetupToken {
-                GlassButton(label: "Choose folder again…", systemImage: "folder") { reconnectFolder() }
-            }
-            #endif
+            ClaudeSetupTokenField(account: entry.id, allowsRemoval: !isTokenOnly) { hasSetupToken = $0 }
             GlassLink(title: "Remove account…") { confirmingRemoval = true }
         }
         .onChange(of: store.isRefreshing) { _, refreshing in
@@ -142,6 +144,10 @@ struct ClaudeAccountRow: View {
         report?.providers.first { $0.id == entry.keychainService }
     }
 
+    private var isTokenOnly: Bool {
+        ClaudeProfile.isTokenOnlyPath(entry.normalizedPath, stateDirectory: UsageStore.stateDirectory)
+    }
+
     private var statusLine: String {
         #if APP_STORE
         let appStore = true
@@ -153,27 +159,18 @@ struct ClaudeAccountRow: View {
                 return error
             }
             if provider.loggedIn, provider.ok, !hasSetupToken {
-                return entry.normalizedPath
+                return entry.normalizedPath == ClaudeProfile.defaultNormalizedPath ? ClaudeProfile.defaultRelativePath : entry.normalizedPath
             }
         }
         if hasSetupToken { return "Setup token saved in this Mac’s Keychain" }
+        if isTokenOnly { return "Add a setup token to reconnect this account" }
         let hasCredential = liveProvider?.loggedIn == true
         return ClaudeProfile.settingsDetail(entry: entry, hasCredential: hasCredential, appStore: appStore)
     }
 
-    private func reconnectFolder() {
-        guard let url = AccountFolderPicker.choose(for: .claude) else { return }
-        do {
-            let path = try AccountFolderPicker.save(url, for: .claude)
-            preferences.addClaudeProfile(path: path)
-            removeError = nil
-            store.connectionsChanged()
-        } catch { removeError = error.localizedDescription }
-    }
-
     private func syncLabel() {
         let label = preferences.claudeLabel(for: entry.normalizedPath)
-            ?? liveProvider?.name
+            ?? (isTokenOnly ? "Claude" : liveProvider?.name)
             ?? ClaudeProfile.defaultLabel(
                 subscriptionType: nil,
                 customLabel: nil,
@@ -185,7 +182,7 @@ struct ClaudeAccountRow: View {
 
     private func commitLabel() {
         guard labelText != committedLabelText else { return }
-        preferences.setClaudeLabel(labelText, for: entry.normalizedPath)
+        preferences.setClaudeLabel(isTokenOnly ? ClaudeProfile.tokenAccountLabel(labelText) : labelText, for: entry.normalizedPath)
         let label = preferences.claudeLabel(for: entry.normalizedPath)
             ?? ClaudeProfile.defaultLabel(
                 subscriptionType: liveProvider?.plan,
