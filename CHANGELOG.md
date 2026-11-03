@@ -10,8 +10,14 @@ published with generated notes on the
 
 ### Added
 
+- A separate Settings window with sidebar sections and an account list beside
+  the selected account's details. Open it from the dropdown gear or with ⌘,.
+- Add account accepts Claude/Codex profile folders, Claude setup tokens, and
+  supported provider keys; Detect accounts lists local CLI profiles to add.
+  The App Store edition uses explicit folder selection instead of scanning.
+
 - Claude setup tokens: enter one from `claude setup-token` per account under
-  **Claude accounts**. It replaces the Claude Code login for that account; each
+  **Settings → Accounts**. It replaces the Claude Code login for that account; each
   refresh sends Haiku a short message and reads the 5-hour and weekly limits
   from the reply.
 - Claude saved usage resets beside the plan badge, including the restored
