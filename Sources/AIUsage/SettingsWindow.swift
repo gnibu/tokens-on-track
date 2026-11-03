@@ -4,8 +4,15 @@ import SwiftUI
 /// One regular window, retained when closed so reopening preserves navigation.
 @MainActor
 final class SettingsWindow {
-    static let shared = SettingsWindow()
+    static let shared = SettingsWindow {
+        AnyView(SettingsView().environmentObject(UsageStore.shared))
+    }
     private var window: NSWindow?
+    private let content: () -> AnyView
+
+    init(content: @escaping () -> AnyView) {
+        self.content = content
+    }
 
     func show() {
         if window == nil {
@@ -21,9 +28,7 @@ final class SettingsWindow {
             window.minSize = NSSize(width: 900, height: 560)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.145, alpha: 1)
-            window.contentViewController = NSHostingController(rootView:
-                SettingsView().environmentObject(UsageStore.shared)
-            )
+            window.contentViewController = NSHostingController(rootView: content())
             window.setFrameAutosaveName("SettingsWindow")
             if !window.setFrameUsingName("SettingsWindow") { window.center() }
             self.window = window
@@ -94,9 +99,12 @@ struct SettingsAccount: Identifiable {
     }
 
     @MainActor
-    static func catalog(store: UsageStore, preferences: Preferences) -> [SettingsAccount] {
-        let providers = store.report?.providers ?? []
-        let claude = preferences.claudeSettingsEntries(discoveredPaths: store.discoveredClaudePaths).map { entry in
+    static func catalog(
+        report: Report?, preferences: Preferences,
+        discoveredClaudePaths: [String] = [], discoveredCodexPaths: [String] = []
+    ) -> [SettingsAccount] {
+        let providers = report?.providers ?? []
+        let claude = preferences.claudeSettingsEntries(discoveredPaths: discoveredClaudePaths).map { entry in
             let provider = providers.first { $0.id == entry.id }
             return SettingsAccount(
                 id: entry.id, kind: "claude", brand: "Claude",
@@ -105,7 +113,7 @@ struct SettingsAccount: Identifiable {
                 provider: provider, connection: .claude(entry)
             )
         }
-        let codex = preferences.codexSettingsEntries(discoveredPaths: store.discoveredCodexPaths).map { entry in
+        let codex = preferences.codexSettingsEntries(discoveredPaths: discoveredCodexPaths).map { entry in
             let provider = providers.first { $0.id == entry.id }
             return SettingsAccount(
                 id: entry.id, kind: "codex", brand: "Codex",
@@ -139,7 +147,11 @@ struct SettingsView: View {
     }
 
     private var accounts: [SettingsAccount] {
-        SettingsAccount.catalog(store: store, preferences: preferences)
+        SettingsAccount.catalog(
+            report: store.report, preferences: preferences,
+            discoveredClaudePaths: store.discoveredClaudePaths,
+            discoveredCodexPaths: store.discoveredCodexPaths
+        )
     }
     private var selectedAccount: SettingsAccount? {
         accounts.first { $0.id == selectedAccountID } ?? accounts.first

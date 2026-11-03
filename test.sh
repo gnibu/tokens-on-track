@@ -13,37 +13,18 @@ case "${1:-}" in
 esac
 mkdir -p .build
 
+# Compile the app's real view/controller sources as well as its pure logic.
+# The executable entry point is replaced by RegressionTests.main.
+for source in Sources/AIUsage/*.swift; do
+    case "$source" in */AIUsageApp.swift) continue ;; esac
+    set -- "$@" "$source"
+done
+
 swiftc -parse-as-library "$@" \
-    Sources/AIUsage/Report.swift \
-    Sources/AIUsage/OutageDismissals.swift \
-    Sources/AIUsage/OpenRouter.swift \
-    Sources/AIUsage/OpenRouterKeychain.swift \
-    Sources/AIUsage/OpenCodeGo.swift \
-    Sources/AIUsage/OpenCodeGoKeychain.swift \
-    Sources/AIUsage/Cursor.swift \
-    Sources/AIUsage/CursorKeychain.swift \
-    Sources/AIUsage/WorkSchedule.swift \
-    Sources/AIUsage/Pace.swift \
-    Sources/AIUsage/ClaudeProfile.swift \
-    Sources/AIUsage/ClaudeSetupTokenKeychain.swift \
-    Sources/AIUsage/CodexProfile.swift \
-    Sources/AIUsage/CodexAccountAccess.swift \
-    Sources/AIUsage/Fetcher.swift \
-    Sources/AIUsage/ResetWatch.swift \
-    Sources/AIUsage/UsageAlerts.swift \
-    Sources/AIUsage/ProviderFolderAccess.swift \
-    Sources/AIUsage/BrandGlyph.swift \
-    Sources/AIUsage/StatusIcon.swift \
-    Sources/AIUsage/AgentServer.swift \
-    Sources/AIUsage/Glass.swift \
-    Sources/AIUsage/UsageCard.swift \
-    Sources/AIUsage/UsageStore.swift \
-    Sources/AIUsage/Preferences.swift \
-    Sources/AIUsage/Notifier.swift \
-    Sources/AIUsage/ClaudeAccountAccess.swift \
     Tests/RegressionTests.swift \
     Tests/ProviderFolderAccessTests.swift \
     Tests/UsageRowRenderTests.swift \
+    Tests/SettingsTests.swift \
     -o "$TEST_BINARY"
 
 # Unbundled, so point the icon lookup at the working copy rather than at the

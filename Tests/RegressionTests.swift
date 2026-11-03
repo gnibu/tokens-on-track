@@ -9,7 +9,10 @@ enum RegressionTests {
 
     static func main() {
         ProviderFolderAccessTests.run()
-        MainActor.assumeIsolated { UsageRowRenderTests.run() }
+        MainActor.assumeIsolated {
+            UsageRowRenderTests.run()
+            SettingsTests.run()
+        }
         testRedHighUsageWindowOutranksGreenWindow()
         testColorTierOutranksPercentage()
         testProcessOutputIsReturned()

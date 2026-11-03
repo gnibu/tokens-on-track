@@ -257,22 +257,36 @@ struct AddAccountSheet: View {
     }
 }
 
+struct DetectedAccount: Identifiable {
+    let provider: AccountProvider
+    let path: String
+    var id: String {
+        provider == .claude ? ClaudeProfile.keychainService(for: path) : CodexProfile.providerID(for: path)
+    }
+}
+
+/// Enumerate candidate folders without reading login secrets or changing settings.
+enum AccountDiscovery {
+    static func profiles(claudePaths: [String], codexPaths: [String]) -> [DetectedAccount] {
+        let claude = Set(claudePaths.map(ClaudeProfile.normalizedPath)).sorted().filter { path in
+            var directory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue
+        }.map { DetectedAccount(provider: .claude, path: $0) }
+        let codex = Set(codexPaths.map(CodexProfile.normalizedPath)).sorted().filter {
+            FileManager.default.isReadableFile(atPath: URL(fileURLWithPath: $0).appendingPathComponent("auth.json").path)
+        }.map { DetectedAccount(provider: .codex, path: $0) }
+        return claude + codex
+    }
+}
+
 struct DetectAccountsSheet: View {
     let existingIDs: Set<String>
     let onAdded: (String) -> Void
     @EnvironmentObject private var store: UsageStore
     @Environment(\.dismiss) private var dismiss
-    @State private var candidates: [Candidate] = []
+    @State private var candidates: [DetectedAccount] = []
     @State private var selected: Set<String> = []
     @State private var scanning = true
-
-    private struct Candidate: Identifiable {
-        let provider: AccountProvider
-        let path: String
-        var id: String {
-            provider == .claude ? ClaudeProfile.keychainService(for: path) : CodexProfile.providerID(for: path)
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -355,7 +369,7 @@ struct DetectAccountsSheet: View {
             let path = try AccountFolderPicker.save(url, for: provider)
             if provider == .claude { Preferences.shared.addClaudeProfile(path: path) }
             else { Preferences.shared.addCodexProfile(path: path) }
-            let candidate = Candidate(provider: provider, path: path)
+            let candidate = DetectedAccount(provider: provider, path: path)
             onAdded(candidate.id)
             store.connectionsChanged()
             dismiss()
@@ -370,16 +384,10 @@ struct DetectAccountsSheet: View {
         let knownCodex = preferences.codexConfiguredPaths + Array(preferences.codexRememberedPaths)
             + Array(preferences.codexIgnoredPaths) + store.discoveredCodexPaths
         let result = await Task.detached(priority: .utility) {
-            let claude = Set(([ClaudeProfile.defaultNormalizedPath] + knownClaude + Fetcher.discoveredClaudeConfigDirs())
-                .map(ClaudeProfile.normalizedPath)).sorted().filter { path in
-                    var directory: ObjCBool = false
-                    return FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue
-                }.map { Candidate(provider: .claude, path: $0) }
-            let codex = Set(([CodexProfile.defaultNormalizedPath] + knownCodex + Fetcher.discoveredCodexHomes())
-                .map(CodexProfile.normalizedPath)).sorted().filter {
-                    FileManager.default.isReadableFile(atPath: URL(fileURLWithPath: $0).appendingPathComponent("auth.json").path)
-                }.map { Candidate(provider: .codex, path: $0) }
-            return claude + codex
+            AccountDiscovery.profiles(
+                claudePaths: [ClaudeProfile.defaultNormalizedPath] + knownClaude + Fetcher.discoveredClaudeConfigDirs(),
+                codexPaths: [CodexProfile.defaultNormalizedPath] + knownCodex + Fetcher.discoveredCodexHomes()
+            )
         }.value
         guard !Task.isCancelled else { return }
         candidates = result
