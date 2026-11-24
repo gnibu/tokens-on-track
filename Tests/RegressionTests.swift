@@ -22,6 +22,7 @@ enum RegressionTests {
         testGrantedKeychainSecretIsKept()
         testClaudeLimitsAreParsedGenerically()
         testClaudeSetupTokenReading()
+        testOutageHintSuggestsSetupToken()
         testClaudeLegacyLimitsRemainFallback()
         testClaudeMalformedLimitsAreSkipped()
         testClaudeKeychainServiceDerivation()
@@ -2496,6 +2497,16 @@ enum RegressionTests {
         if case .failed = Fetcher.codexRedemption([:]) {} else {
             check(false, "an unknown answer must be reported as a failure")
         }
+    }
+
+    private static func testOutageHintSuggestsSetupToken() {
+        var claude = Provider(id: "tests-no-setup-token-\(UUID().uuidString)", kind: "claude", name: "Claude")
+        claude.error = "rate limited — the reading will catch up"
+        check(OutageNotice.hint(claude)?.contains("setup token") == true, "a Claude warning without a setup token must suggest adding one")
+
+        var codex = Provider(id: "Codex", kind: "codex", name: "Codex")
+        codex.error = "unreachable"
+        check(OutageNotice.hint(codex) == nil, "only Claude accounts can take a setup token")
     }
 
     private static func testResetCreditsSurviveCacheAndCarryOver() {

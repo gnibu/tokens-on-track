@@ -253,6 +253,7 @@ struct OutageNotice: View {
                         Text(Self.line(provider))
                             .font(.system(size: size))
                             .fixedSize(horizontal: false, vertical: true)
+                            .help(Self.hint(provider) ?? "")
 
                         Spacer(minLength: 0)
 
@@ -287,6 +288,13 @@ struct OutageNotice: View {
             return "\(provider.name): \(reason)"
         }
         return "\(provider.name): \(reason) · rows from \(Pace.clockLabel(measured))"
+    }
+
+    /// A setup token reads the limits from a message reply instead of the usage
+    /// endpoint, so a Claude login that keeps failing has a way out.
+    static func hint(_ provider: Provider) -> String? {
+        guard provider.kind == "claude", ClaudeSetupTokenKeychain.read(account: provider.id) == nil else { return nil }
+        return "If this keeps happening, add a setup token to this account in Settings → Accounts (run claude setup-token to create one). It reads usage another way, so this warning should stop."
     }
 }
 
