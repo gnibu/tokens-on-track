@@ -242,6 +242,13 @@ struct OutageNotice: View {
     let providers: [Provider]
     let size: CGFloat
 
+    /// `hovered` lets a test draw the hint open.
+    init(providers: [Provider], size: CGFloat, hovered: Provider.ID? = nil) {
+        self.providers = providers
+        self.size = size
+        _hovered = State(initialValue: hovered)
+    }
+
     var body: some View {
         let down = providers.filter {
             OutageDismissals.reason(for: $0) != nil && !dismissals.isDismissed($0)
