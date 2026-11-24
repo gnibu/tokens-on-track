@@ -2506,7 +2506,13 @@ enum RegressionTests {
 
         var codex = Provider(id: "Codex", kind: "codex", name: "Codex")
         codex.error = "unreachable"
-        check(OutageNotice.hint(codex) == nil, "only Claude accounts can take a setup token")
+        check(OutageNotice.hint(codex)?.contains("setup token") == false, "only Claude accounts can take a setup token")
+
+        for kind in ["codex", "cursor", "openrouter", "opencode-go"] {
+            let other = Provider(id: kind, kind: kind, name: kind)
+            check(OutageNotice.hint(other)?.hasPrefix("If this keeps happening") == true, "a \(kind) warning must suggest a fix")
+        }
+        check(OutageNotice.hint(Provider(id: "x", kind: "unknown", name: "X")) == nil, "an unknown provider has no fix to suggest")
     }
 
     private static func testResetCreditsSurviveCacheAndCarryOver() {

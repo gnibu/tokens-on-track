@@ -233,6 +233,9 @@ struct MenuUsageView: View {
 /// spending, and the rows below still say everything we do know.
 struct OutageNotice: View {
     @ObservedObject private var dismissals = OutageDismissals.shared
+    // Shown inline on hover, not as a .help tooltip: both panels are
+    // nonactivating, and AppKit only draws tooltips for the active app.
+    @State private var hovered: Provider.ID?
 
     /// Already filtered to what the surface draws — a hidden or never-set-up
     /// provider is not reported as an outage.
@@ -247,29 +250,41 @@ struct OutageNotice: View {
         if !down.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(down) { provider in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.circle")
-                            .font(.system(size: size))
-                        Text(Self.line(provider))
-                            .font(.system(size: size))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .help(Self.hint(provider) ?? "")
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: size))
+                            Text(Self.line(provider))
+                                .font(.system(size: size))
+                                .fixedSize(horizontal: false, vertical: true)
 
-                        Spacer(minLength: 0)
+                            Spacer(minLength: 0)
 
-                        Button {
-                            dismissals.dismiss(provider)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: size - 1, weight: .medium))
-                                .foregroundStyle(Glass.ink(0.5))
-                                .frame(width: 20, height: 20)
-                                .contentShape(Rectangle())
+                            Button {
+                                dismissals.dismiss(provider)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: size - 1, weight: .medium))
+                                    .foregroundStyle(Glass.ink(0.5))
+                                    .frame(width: 20, height: 20)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .focusEffectDisabled()
+                            .accessibilityLabel("Dismiss warning for \(provider.name)")
+                            .help("Dismiss this warning until the problem changes or happens again after recovery")
                         }
-                        .buttonStyle(.plain)
-                        .focusEffectDisabled()
-                        .accessibilityLabel("Dismiss warning for \(provider.name)")
-                        .help("Dismiss this warning until the problem changes or happens again after recovery")
+                        if hovered == provider.id, let hint = Self.hint(provider) {
+                            Text(hint)
+                                .font(.system(size: size - 1))
+                                .foregroundStyle(Glass.ink(0.7))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, size + 6)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { hovered = provider.id } else if hovered == provider.id { hovered = nil }
                     }
                 }
             }
@@ -290,11 +305,28 @@ struct OutageNotice: View {
         return "\(provider.name): \(reason) · rows from \(Pace.clockLabel(measured))"
     }
 
-    /// A setup token reads the limits from a message reply instead of the usage
-    /// endpoint, so a Claude login that keeps failing has a way out.
+    /// The way out of a warning that keeps coming back: a credential of the app's
+    /// own (a Claude setup token, or a provider key) does not go stale with
+    /// another app's sign-in; Codex has none, so its CLI has to refresh it.
     static func hint(_ provider: Provider) -> String? {
-        guard provider.kind == "claude", ClaudeSetupTokenKeychain.read(account: provider.id) == nil else { return nil }
-        return "If this keeps happening, add a setup token to this account in Settings → Accounts (run claude setup-token to create one). It reads usage another way, so this warning should stop."
+        switch provider.kind {
+        case "claude":
+            return ClaudeSetupTokenKeychain.read(account: provider.id) == nil
+                ? "If this keeps happening, add a setup token to this account in Settings → Accounts (run claude setup-token to create one). It reads usage another way, so this warning should stop."
+                : "If this keeps happening, the setup token saved for this account may have been revoked: replace it in Settings → Accounts (run claude setup-token to create a new one)."
+        case "codex":
+            return "If this keeps happening, run Codex once for this account so it refreshes its sign-in, or run codex login if it says you are signed out."
+        case "cursor": return keyHint("Cursor", saved: CursorKeychain.read() != nil)
+        case "openrouter": return keyHint("OpenRouter", saved: OpenRouterKeychain.read() != nil)
+        case "opencode-go": return keyHint("OpenCode Go", saved: OpenCodeGoKeychain.read() != nil)
+        default: return nil
+        }
+    }
+
+    private static func keyHint(_ name: String, saved: Bool) -> String {
+        saved
+            ? "If this keeps happening, the \(name) key saved in Settings → Accounts may have been revoked: replace it there."
+            : "If this keeps happening, add a \(name) API key in Settings → Accounts. The app reads it directly, so it does not go stale when another app's sign-in does."
     }
 }
 
