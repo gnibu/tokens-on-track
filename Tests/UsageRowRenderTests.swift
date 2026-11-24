@@ -52,6 +52,30 @@ enum UsageRowRenderTests {
             testBarKeepsItsHeightAndCentresOnTheFigure(metrics)
             testLiveZeroIsNotGrey(metrics)
         }
+        testOutageHintShowsOnHover()
+    }
+
+    /// The panels never make the app active, so a .help tooltip never shows;
+    /// the hint has to be drawn under the warning while it is hovered.
+    private static func testOutageHintShowsOnHover() {
+        var cursor = Provider(id: "tests-outage-hint-\(UUID().uuidString)", kind: "cursor", name: "Cursor")
+        cursor.error = "stored token went stale — open Cursor once"
+        func draw(_ hovered: Provider.ID?) -> CGImage? {
+            let renderer = ImageRenderer(content:
+                OutageNotice(providers: [cursor], size: 12, hovered: hovered)
+                    .frame(width: CGFloat(width))
+                    .padding(CGFloat(padding))
+                    .background(Color(white: 0.2))
+            )
+            renderer.scale = 2
+            return renderer.cgImage
+        }
+        guard let closed = draw(nil), let open = draw(cursor.id) else { fail("the warning did not render") }
+        check(open.height > closed.height + 20, "hovering a warning must draw its hint under it: \(closed.height)px → \(open.height)px")
+        if let path = ProcessInfo.processInfo.environment["OUTAGE_HINT_PNG"] {
+            let data = NSBitmapImageRep(cgImage: open).representation(using: .png, properties: [:])
+            try? data?.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     /// The tick is taller than the bar and used to stretch it to the tick's own
