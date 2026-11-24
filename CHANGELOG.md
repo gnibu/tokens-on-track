@@ -21,9 +21,9 @@ published with generated notes on the
   refresh sends Haiku a short message and reads the 5-hour and weekly limits
   from the reply.
 - Hovering a provider's warning in the dropdown or on the desktop card
-  suggests a fix: a Claude setup token, a Cursor, OpenRouter or OpenCode Go
-  API key in **Settings → Accounts** (or replacing a saved one), or running
-  Codex again to refresh its sign-in.
+  suggests a fix: a Claude setup token, a Cursor session token or team Admin
+  key, an OpenRouter or OpenCode Go API key in **Settings → Accounts** (or
+  replacing a saved one), or running Codex again to refresh its sign-in.
 - Claude saved usage resets beside the plan badge, including the restored
   limits, expiry, and confirmation before redemption. Expired and paused
   grants are excluded; availability is checked again before spending one.

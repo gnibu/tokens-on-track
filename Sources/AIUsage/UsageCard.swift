@@ -316,6 +316,8 @@ struct OutageNotice: View {
     /// own (a Claude setup token, or a provider key) does not go stale with
     /// another app's sign-in; Codex has none, so its CLI has to refresh it.
     static func hint(_ provider: Provider) -> String? {
+        // A missing budget is not a credential problem; its warning already says the fix.
+        if provider.needsBudget { return nil }
         switch provider.kind {
         case "claude":
             return ClaudeSetupTokenKeychain.read(account: provider.id) == nil
@@ -323,7 +325,11 @@ struct OutageNotice: View {
                 : "If this keeps happening, the setup token saved for this account may have been revoked: replace it in Settings → Accounts (run claude setup-token to create a new one)."
         case "codex":
             return "If this keeps happening, run Codex once for this account so it refreshes its sign-in, or run codex login if it says you are signed out."
-        case "cursor": return keyHint("Cursor", saved: CursorKeychain.read() != nil)
+        case "cursor":
+            // A personal Cursor API key cannot read usage (see AccountSetup.credentialHelp).
+            return CursorKeychain.read() == nil
+                ? "If this keeps happening, add a Cursor session token or team Admin API key in Settings → Accounts; a personal API key cannot read usage. On a personal account, opening Cursor once refreshes its sign-in."
+                : "If this keeps happening, the key saved in Settings → Accounts may have been revoked, or be a personal key that cannot read usage: replace it with a session token or team Admin API key."
         case "openrouter": return keyHint("OpenRouter", saved: OpenRouterKeychain.read() != nil)
         case "opencode-go": return keyHint("OpenCode Go", saved: OpenCodeGoKeychain.read() != nil)
         default: return nil

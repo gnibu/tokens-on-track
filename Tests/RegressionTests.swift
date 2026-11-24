@@ -2513,6 +2513,11 @@ enum RegressionTests {
             check(OutageNotice.hint(other)?.hasPrefix("If this keeps happening") == true, "a \(kind) warning must suggest a fix")
         }
         check(OutageNotice.hint(Provider(id: "x", kind: "unknown", name: "X")) == nil, "an unknown provider has no fix to suggest")
+
+        var budget = Provider(id: "OpenRouter", kind: "openrouter", name: "OpenRouter")
+        budget.error = OpenRouterBudget.missingBudgetMessage
+        check(OutageNotice.hint(budget) == nil, "a missing budget is not a credential problem, so no key hint")
+        check(OutageNotice.hint(Provider(id: "cursor", kind: "cursor", name: "Cursor"))?.contains("Admin") == true, "a Cursor hint must name a key that can read usage")
     }
 
     private static func testResetCreditsSurviveCacheAndCarryOver() {
